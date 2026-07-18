@@ -187,7 +187,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
         .then(([r, favs]) => { setHits(r); setFavHits(favs); })
         .catch(() => { setHits([]); setFavHits([]); })
         .finally(() => setSearchLoading(false));
-    }, semanticMode ? 300 : 180);
+    }, 1500);
     return () => { clearTimeout(handle); setSearchLoading(false); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, hasQuery, isComposing, semanticMode, embedConfig, platform, dateFrom, dateTo, minMsg, maxMsg]);

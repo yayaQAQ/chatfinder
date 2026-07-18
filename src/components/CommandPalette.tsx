@@ -98,7 +98,7 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
         .then(([r, favs]) => { setHits(r); setFavHits(favs); setActive(0); })
         .catch(() => {})
         .finally(() => setLoading(false));
-    }, 150);
+    }, 1500);
     return () => clearTimeout(t);
   }, [query, semanticMode, isComposing]);
 
@@ -114,7 +114,7 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
         .then((r) => { setSemanticHits(r); setActive(0); })
         .catch(() => setSemanticHits([]))
         .finally(() => setSemanticLoading(false));
-    }, 300);
+    }, 1500);
     return () => { clearTimeout(t); setSemanticLoading(false); };
   }, [query, semanticMode, embedConfig, isComposing]);
 
