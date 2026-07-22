@@ -1,5 +1,7 @@
 # ChatFinder
 
+[中文](README.zh-CN.md) | English
+
 A cross-platform desktop app (Tauri + React) for importing, browsing, and searching your AI chat history from **Claude**, **ChatGPT**, **DeepSeek**, and local coding agents (**Claude Code**, **Codex CLI**) — all stored locally in a single SQLite database.
 
 ## Features
@@ -9,7 +11,7 @@ A cross-platform desktop app (Tauri + React) for importing, browsing, and search
   - ChatGPT (`conversations.json` / split `conversations-NNN.json`, including inline image attachments)
   - DeepSeek (`conversations.json` with `mapping` + `fragments`, including model "thinking" blocks)
 - **Local agent session import** — scans `~/.claude/projects` and `~/.codex/sessions` for Claude Code / Codex CLI transcripts and imports them as conversations too.
-- **Full-text search** across all conversations and messages (SQLite FTS5 + BM25 ranking), with filters by platform, date range, and message count.
+- **Full-text search** across all conversations and messages (SQLite FTS5 + BM25 ranking), with filters by platform, date range, message count, and sender (user input only / AI replies only).
 - **Semantic search** — generate embeddings via any OpenAI-compatible `/v1/embeddings` endpoint and search by meaning, not just keywords.
 - **Favorites** — save message snippets with notes and auto-suggested/custom tags; browse and search your favorites separately.
 - **Conversation viewer** with Markdown + syntax-highlighted code rendering.
