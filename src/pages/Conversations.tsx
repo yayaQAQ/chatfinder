@@ -3,9 +3,9 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   Search, MessageSquare, Inbox, Loader2, X,
   SlidersHorizontal, ArrowUpDown, Calendar, Hash, BrainCircuit,
-  History, FileText, Heading, Star,
+  History, FileText, Heading, Star, UserRound, Bot,
 } from "lucide-react";
-import { api, type ConversationSummary, type ConversationFilter, type SortOption, type SearchHit, type FavoriteRow, type EmbedConfig } from "../lib/api";
+import { api, type ConversationSummary, type ConversationFilter, type SortOption, type RoleFilter, type SearchHit, type FavoriteRow, type EmbedConfig } from "../lib/api";
 import { QuerySnippet, FtsSnippet } from "../lib/highlight";
 import { getRecentSearches, addRecentSearch, removeRecentSearch } from "../lib/searchHistory";
 
@@ -54,6 +54,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
   const dateTo       = searchParams.get("to")       ?? "";
   const minMsg       = searchParams.get("min")      ?? "";
   const maxMsg       = searchParams.get("max")      ?? "";
+  const role         = (searchParams.get("role")    ?? "") as RoleFilter;
   const sort         = (searchParams.get("sort")    ?? "newest") as SortOption;
   const semanticMode = searchParams.get("semantic") === "1";
 
@@ -81,6 +82,10 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
 
   const [showFilter, setShowFilter] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
+  // Sticky once true: the role filter only matters for search hits, but we want
+  // it visible in the filter panel as soon as the user engages with the search
+  // box, not only after they've typed something and lose it again on blur.
+  const [searchEverFocused, setSearchEverFocused] = useState(() => searchParams.get("q") ? true : false);
   const [recentSearches, setRecentSearches] = useState<string[]>(() => getRecentSearches());
 
   const setParam = (key: string, val: string) =>
@@ -95,11 +100,12 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
   const setDateTo   = (v: string)      => setParam("to", v);
   const setMinMsg   = (v: string)      => setParam("min", v);
   const setMaxMsg   = (v: string)      => setParam("max", v);
+  const setRole     = (v: RoleFilter)  => setParam("role", v);
   const setSort     = (v: SortOption)  => setParam("sort", v === "newest" ? "" : v);
 
   const hasQuery = query.trim().length > 0;
 
-  const structuralFilter = { platform, dateFrom, dateTo, minMessages: minMsg ? parseInt(minMsg) : undefined, maxMessages: maxMsg ? parseInt(maxMsg) : undefined };
+  const structuralFilter = { platform, dateFrom, dateTo, minMessages: minMsg ? parseInt(minMsg) : undefined, maxMessages: maxMsg ? parseInt(maxMsg) : undefined, role };
 
   // ── Browse mode (no query): paginated conversation card grid ──
   const [items, setItems]           = useState<ConversationSummary[]>([]);
@@ -190,7 +196,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
     }, 1500);
     return () => { clearTimeout(handle); setSearchLoading(false); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, hasQuery, isComposing, semanticMode, embedConfig, platform, dateFrom, dateTo, minMsg, maxMsg]);
+  }, [query, hasQuery, isComposing, semanticMode, embedConfig, platform, dateFrom, dateTo, minMsg, maxMsg, role]);
 
   // Build human-readable active filter chips
   const activeFilters: ActiveFilter[] = [];
@@ -199,6 +205,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
   if (dateTo)     activeFilters.push({ label: `至 ${dateTo}`, clear: () => setDateTo("") });
   if (minMsg)     activeFilters.push({ label: `≥ ${minMsg} 条消息`, clear: () => setMinMsg("") });
   if (maxMsg)     activeFilters.push({ label: `≤ ${maxMsg} 条消息`, clear: () => setMaxMsg("") });
+  if (hasQuery && role) activeFilters.push({ label: role === "human" ? "仅用户输入" : "仅 AI 回复", clear: () => setRole("") });
   if (!hasQuery && sort !== "newest") {
     const label = SORT_OPTIONS.find(o => o.value === sort)?.label ?? sort;
     activeFilters.push({ label, clear: () => setSort("newest") });
@@ -207,7 +214,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
   const clearAll = () => {
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
-      ["platform", "from", "to", "min", "max", "sort"].forEach((k) => next.delete(k));
+      ["platform", "from", "to", "min", "max", "role", "sort"].forEach((k) => next.delete(k));
       return next;
     }, { replace: true });
   };
@@ -230,7 +237,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                 onChange={(e) => setQuery(e.target.value)}
                 onCompositionStart={() => setIsComposing(true)}
                 onCompositionEnd={(e) => { setIsComposing(false); setQuery(e.currentTarget.value); }}
-                onFocus={() => setSearchFocused(true)}
+                onFocus={() => { setSearchFocused(true); setSearchEverFocused(true); }}
                 onBlur={() => setTimeout(() => setSearchFocused(false), 120)}
                 placeholder={semanticMode ? "描述你想找的内容，例如：关于机器学习的对话…" : "搜索标题、消息内容或收藏…"}
                 className={`h-12 w-full rounded-2xl border pl-12 pr-10 text-[15px] outline-none transition-colors placeholder:text-stone-400 ${
@@ -394,6 +401,35 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                   />
                 </div>
               </div>
+
+              {(hasQuery || searchEverFocused) && (
+                <div className="flex items-start gap-3">
+                  <label className="w-16 shrink-0 pt-1 text-xs font-medium text-stone-500 flex items-center gap-1">
+                    <UserRound size={11} />
+                    搜索范围
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    {([
+                      { value: "", label: "全部", icon: null },
+                      { value: "human", label: "仅用户输入", icon: UserRound },
+                      { value: "assistant", label: "仅 AI 回复", icon: Bot },
+                    ] as const).map((o) => (
+                      <button
+                        key={o.value}
+                        onClick={() => setRole(o.value)}
+                        className={`flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                          role === o.value
+                            ? "border-orange-300 bg-orange-100 text-orange-700"
+                            : "border-stone-200 bg-white text-stone-600 hover:bg-stone-100"
+                        }`}
+                      >
+                        {o.icon && <o.icon size={11} />}
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {!hasQuery && (
                 <div className="flex items-start gap-3">

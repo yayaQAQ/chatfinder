@@ -84,12 +84,15 @@ export interface AgentSource {
 
 export type SortOption = "newest" | "oldest" | "most_messages" | "fewest_messages";
 
+export type RoleFilter = "" | "human" | "assistant";
+
 export interface StructuralFilter {
   platform?: string;
   dateFrom?: string;
   dateTo?: string;
   minMessages?: number;
   maxMessages?: number;
+  role?: RoleFilter;
 }
 
 export interface ConversationFilter extends StructuralFilter {
@@ -131,6 +134,7 @@ export const api = {
       dateTo: filter.dateTo ?? "",
       minMessages: filter.minMessages ?? 0,
       maxMessages: filter.maxMessages ?? 0,
+      role: filter.role ?? "",
     }),
   searchFavorites: (query: string) => invoke<FavoriteRow[]>("search_favorites", { query }),
   createFavorite: (
@@ -181,5 +185,6 @@ export const api = {
       dateTo: filter.dateTo ?? "",
       minMessages: filter.minMessages ?? 0,
       maxMessages: filter.maxMessages ?? 0,
+      role: filter.role ?? "",
     }),
 };

@@ -216,6 +216,7 @@ pub fn search_all(
     date_to: Option<String>,
     min_messages: Option<i64>,
     max_messages: Option<i64>,
+    role: Option<String>,
 ) -> Result<Vec<SearchHit>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let trimmed = query.trim();
@@ -227,24 +228,32 @@ pub fn search_all(
     let dt = date_to.unwrap_or_default();
     let min_msg = min_messages.unwrap_or(0);
     let max_msg = max_messages.unwrap_or(0);
+    let role_filter = role.unwrap_or_default();
 
     let fts_query = format!("{}*", trimmed.replace('"', " "));
+    // LEFT JOIN messages: si.ref_id is a message id for kind='message' hits and a
+    // conversation id for kind='title' hits, so title hits get sender=NULL and are
+    // naturally excluded whenever a role filter is active (a title isn't "user
+    // input" or "AI output").
     let mut stmt = conn
         .prepare(
             "SELECT si.ref_id, si.conversation_id, si.kind, snippet(search_index, 3, '【', '】', '…', 12),
                     c.title, c.platform, c.updated_at, c.created_at
-             FROM search_index si JOIN conversations c ON c.id = si.conversation_id
+             FROM search_index si
+             JOIN conversations c ON c.id = si.conversation_id
+             LEFT JOIN messages m ON m.id = si.ref_id
              WHERE si.text MATCH ?1
                AND (?2 = '' OR c.platform = ?2)
                AND (?3 = '' OR DATE(COALESCE(c.updated_at, c.created_at)) >= ?3)
                AND (?4 = '' OR DATE(COALESCE(c.updated_at, c.created_at)) <= ?4)
                AND (?5 = 0 OR c.message_count >= ?5)
                AND (?6 = 0 OR c.message_count <= ?6)
+               AND (?7 = '' OR m.sender = ?7)
              ORDER BY bm25(search_index) ASC LIMIT 400",
         )
         .map_err(|e| e.to_string())?;
     let mut rows = stmt
-        .query(params![fts_query, plat_filter, df, dt, min_msg, max_msg])
+        .query(params![fts_query, plat_filter, df, dt, min_msg, max_msg, role_filter])
         .map_err(|e| e.to_string())?;
     let mut hits = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -705,6 +714,7 @@ pub async fn semantic_search(
     date_to: Option<String>,
     min_messages: Option<i64>,
     max_messages: Option<i64>,
+    role: Option<String>,
 ) -> Result<Vec<SearchHit>, String> {
     if query.trim().is_empty() {
         return Ok(vec![]);
@@ -714,21 +724,23 @@ pub async fn semantic_search(
     let dt = date_to.unwrap_or_default();
     let min_msg = min_messages.unwrap_or(0);
     let max_msg = max_messages.unwrap_or(0);
+    let role_filter = role.unwrap_or_default();
 
     // 1. Embed the query — no lock held during network call
     let vecs = embed::call_embed_api(&api_url, &model, &api_key, vec![query]).await?;
     let query_vec = vecs.into_iter().next().ok_or("无嵌入结果".to_string())?;
 
-    // 2. Load all embeddings — hold lock briefly
+    // 2. Load embeddings, restricted to the requested sender — hold lock briefly
     let candidates: Vec<(String, String, Vec<f32>)> = {
         let conn = state.0.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
                 "SELECT e.message_id, m.conversation_id, e.vec
-                 FROM embeddings e JOIN messages m ON m.id = e.message_id",
+                 FROM embeddings e JOIN messages m ON m.id = e.message_id
+                 WHERE (?1 = '' OR m.sender = ?1)",
             )
             .map_err(|e| e.to_string())?;
-        let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+        let mut rows = stmt.query(params![role_filter]).map_err(|e| e.to_string())?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().map_err(|e| e.to_string())? {
             let msg_id: String = row.get(0).map_err(|e| e.to_string())?;
