@@ -8,21 +8,9 @@ import {
 import { api, type ConversationSummary, type ConversationFilter, type SortOption, type RoleFilter, type SearchHit, type FavoriteRow, type EmbedConfig } from "../lib/api";
 import { QuerySnippet, FtsSnippet } from "../lib/highlight";
 import { getRecentSearches, addRecentSearch, removeRecentSearch } from "../lib/searchHistory";
+import { useI18n, formatRelativeDate, type TranslationKey } from "../lib/i18n";
 
 const PAGE_SIZE = 60;
-
-function formatDate(iso: string | null) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
-  const now = new Date();
-  const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
-  if (diffDays === 0) return "今天";
-  if (diffDays === 1) return "昨天";
-  if (diffDays < 7) return `${diffDays} 天前`;
-  if (diffDays < 365) return d.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
-  return d.toLocaleDateString("zh-CN", { year: "numeric", month: "numeric", day: "numeric" });
-}
 
 const platformBadge: Record<string, string> = {
   claude:        "bg-orange-100 text-orange-700 border-orange-200",
@@ -33,11 +21,11 @@ const platformBadge: Record<string, string> = {
 };
 const platformLabel: Record<string, string> = { claude: "Claude", chatgpt: "ChatGPT", deepseek: "DeepSeek", "claude-code": "Claude Code", codex: "Codex" };
 
-const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: "newest",          label: "最近更新" },
-  { value: "oldest",          label: "最早更新" },
-  { value: "most_messages",   label: "消息最多" },
-  { value: "fewest_messages", label: "消息最少" },
+const SORT_OPTIONS: { value: SortOption; labelKey: TranslationKey }[] = [
+  { value: "newest",          labelKey: "conversations.sortNewest" },
+  { value: "oldest",          labelKey: "conversations.sortOldest" },
+  { value: "most_messages",   labelKey: "conversations.sortMostMessages" },
+  { value: "fewest_messages", labelKey: "conversations.sortFewestMessages" },
 ];
 
 interface ActiveFilter {
@@ -46,6 +34,7 @@ interface ActiveFilter {
 }
 
 export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: number; embedIndexed?: number }) {
+  const { t, lang } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Filter state in URL — restores on back-navigation (component remounts from URL)
@@ -201,13 +190,13 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
   // Build human-readable active filter chips
   const activeFilters: ActiveFilter[] = [];
   if (platform)   activeFilters.push({ label: platformLabel[platform] ?? platform, clear: () => setPlatform("") });
-  if (dateFrom)   activeFilters.push({ label: `从 ${dateFrom}`, clear: () => setDateFrom("") });
-  if (dateTo)     activeFilters.push({ label: `至 ${dateTo}`, clear: () => setDateTo("") });
-  if (minMsg)     activeFilters.push({ label: `≥ ${minMsg} 条消息`, clear: () => setMinMsg("") });
-  if (maxMsg)     activeFilters.push({ label: `≤ ${maxMsg} 条消息`, clear: () => setMaxMsg("") });
-  if (hasQuery && role) activeFilters.push({ label: role === "human" ? "仅用户输入" : "仅 AI 回复", clear: () => setRole("") });
+  if (dateFrom)   activeFilters.push({ label: t("conversations.fromPrefix", { date: dateFrom }), clear: () => setDateFrom("") });
+  if (dateTo)     activeFilters.push({ label: t("conversations.toPrefix", { date: dateTo }), clear: () => setDateTo("") });
+  if (minMsg)     activeFilters.push({ label: t("conversations.minMessagesChip", { n: minMsg }), clear: () => setMinMsg("") });
+  if (maxMsg)     activeFilters.push({ label: t("conversations.maxMessagesChip", { n: maxMsg }), clear: () => setMaxMsg("") });
+  if (hasQuery && role) activeFilters.push({ label: role === "human" ? t("conversations.scopeHumanOnly") : t("conversations.scopeAssistantOnly"), clear: () => setRole("") });
   if (!hasQuery && sort !== "newest") {
-    const label = SORT_OPTIONS.find(o => o.value === sort)?.label ?? sort;
+    const label = t(SORT_OPTIONS.find(o => o.value === sort)?.labelKey ?? "conversations.sortNewest");
     activeFilters.push({ label, clear: () => setSort("newest") });
   }
 
@@ -239,7 +228,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                 onCompositionEnd={(e) => { setIsComposing(false); setQuery(e.currentTarget.value); }}
                 onFocus={() => { setSearchFocused(true); setSearchEverFocused(true); }}
                 onBlur={() => setTimeout(() => setSearchFocused(false), 120)}
-                placeholder={semanticMode ? "描述你想找的内容，例如：关于机器学习的对话…" : "搜索标题、消息内容或收藏…"}
+                placeholder={semanticMode ? t("conversations.searchPlaceholderSemantic") : t("conversations.searchPlaceholderKeyword")}
                 className={`h-12 w-full rounded-2xl border pl-12 pr-10 text-[15px] outline-none transition-colors placeholder:text-stone-400 ${
                   semanticMode
                     ? "border-violet-300 bg-violet-50 focus:border-violet-400 focus:bg-white focus:ring-4 focus:ring-violet-100"
@@ -260,7 +249,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                 <div className="absolute left-0 right-0 top-full z-10 mt-1.5 overflow-hidden rounded-xl border border-stone-200 bg-white py-1.5 shadow-lg">
                   <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium text-stone-400">
                     <History size={11} />
-                    最近搜索
+                    {t("conversations.recentSearches")}
                   </div>
                   {recentSearches.map((term) => (
                     <div key={term} className="group flex items-center justify-between px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-50">
@@ -287,7 +276,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
             {embedAvail && (
               <button
                 onClick={() => setParam("semantic", semanticMode ? "" : "1")}
-                title={semanticMode ? "切换回关键词搜索" : "切换到语义搜索（AI）"}
+                title={semanticMode ? t("conversations.toggleToKeyword") : t("conversations.toggleToSemantic")}
                 className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border transition-colors ${
                   semanticMode
                     ? "border-violet-300 bg-violet-100 text-violet-700"
@@ -307,7 +296,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
               }`}
             >
               <SlidersHorizontal size={15} />
-              筛选
+              {t("conversations.filter")}
               {activeFilters.length > 0 && (
                 <span className="flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[10px] text-white font-bold">
                   {activeFilters.length}
@@ -328,7 +317,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                     : "border-stone-200 bg-white text-stone-600 hover:bg-stone-100"
                 }`}
               >
-                {p === "" ? "全部平台" : platformLabel[p] ?? p}
+                {p === "" ? t("conversations.allPlatforms") : platformLabel[p] ?? p}
               </button>
             ))}
             {!hasQuery && (
@@ -344,7 +333,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                         : "border-stone-200 bg-white text-stone-500 hover:bg-stone-100"
                     }`}
                   >
-                    {o.label}
+                    {t(o.labelKey)}
                   </button>
                 ))}
               </>
@@ -355,9 +344,9 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
           {showFilter && (
             <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 space-y-4">
               <div className="flex items-start gap-3">
-                <label className="w-16 shrink-0 pt-1 text-xs font-medium text-stone-500 flex items-center gap-1">
+                <label className="w-28 shrink-0 whitespace-nowrap pt-1 text-xs font-medium text-stone-500 flex items-center gap-1">
                   <Calendar size={11} />
-                  日期
+                  {t("conversations.filterDateLabel")}
                 </label>
                 <div className="flex items-center gap-2">
                   <input
@@ -366,7 +355,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                     onChange={(e) => setDateFrom(e.target.value)}
                     className="h-8 rounded-lg border border-stone-200 bg-white px-2.5 text-xs text-stone-700 outline-none focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
                   />
-                  <span className="text-xs text-stone-400">至</span>
+                  <span className="text-xs text-stone-400">{t("conversations.dateRangeSeparator")}</span>
                   <input
                     type="date"
                     value={dateTo}
@@ -377,9 +366,9 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
               </div>
 
               <div className="flex items-start gap-3">
-                <label className="w-16 shrink-0 pt-1 text-xs font-medium text-stone-500 flex items-center gap-1">
+                <label className="w-28 shrink-0 whitespace-nowrap pt-1 text-xs font-medium text-stone-500 flex items-center gap-1">
                   <Hash size={11} />
-                  消息数
+                  {t("conversations.filterMessageCountLabel")}
                 </label>
                 <div className="flex items-center gap-2">
                   <input
@@ -387,7 +376,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                     min="0"
                     value={minMsg}
                     onChange={(e) => setMinMsg(e.target.value)}
-                    placeholder="最少"
+                    placeholder={t("conversations.minPlaceholder")}
                     className="h-8 w-20 rounded-lg border border-stone-200 bg-white px-2.5 text-xs text-stone-700 outline-none focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
                   />
                   <span className="text-xs text-stone-400">—</span>
@@ -396,7 +385,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                     min="0"
                     value={maxMsg}
                     onChange={(e) => setMaxMsg(e.target.value)}
-                    placeholder="最多"
+                    placeholder={t("conversations.maxPlaceholder")}
                     className="h-8 w-20 rounded-lg border border-stone-200 bg-white px-2.5 text-xs text-stone-700 outline-none focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
                   />
                 </div>
@@ -404,15 +393,15 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
 
               {(hasQuery || searchEverFocused) && (
                 <div className="flex items-start gap-3">
-                  <label className="w-16 shrink-0 pt-1 text-xs font-medium text-stone-500 flex items-center gap-1">
+                  <label className="w-28 shrink-0 whitespace-nowrap pt-1 text-xs font-medium text-stone-500 flex items-center gap-1">
                     <UserRound size={11} />
-                    搜索范围
+                    {t("conversations.filterScopeLabel")}
                   </label>
                   <div className="flex items-center gap-1.5">
                     {([
-                      { value: "", label: "全部", icon: null },
-                      { value: "human", label: "仅用户输入", icon: UserRound },
-                      { value: "assistant", label: "仅 AI 回复", icon: Bot },
+                      { value: "", labelKey: "conversations.scopeAll", icon: null },
+                      { value: "human", labelKey: "conversations.scopeHumanOnly", icon: UserRound },
+                      { value: "assistant", labelKey: "conversations.scopeAssistantOnly", icon: Bot },
                     ] as const).map((o) => (
                       <button
                         key={o.value}
@@ -424,7 +413,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                         }`}
                       >
                         {o.icon && <o.icon size={11} />}
-                        {o.label}
+                        {t(o.labelKey)}
                       </button>
                     ))}
                   </div>
@@ -433,18 +422,18 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
 
               {!hasQuery && (
                 <div className="flex items-start gap-3">
-                  <label className="w-16 shrink-0 pt-1 text-xs font-medium text-stone-500 flex items-center gap-1">
+                  <label className="w-28 shrink-0 whitespace-nowrap pt-1 text-xs font-medium text-stone-500 flex items-center gap-1">
                     <ArrowUpDown size={11} />
-                    排序
+                    {t("conversations.sortLabel")}
                   </label>
-                  <p className="pt-1.5 text-xs text-stone-400">已在上方快捷条中可选</p>
+                  <p className="pt-1.5 text-xs text-stone-400">{t("conversations.sortAlreadyAvailable")}</p>
                 </div>
               )}
 
               {activeFilters.length > 0 && (
                 <div className="pt-1 border-t border-stone-200 flex justify-end">
                   <button onClick={clearAll} className="text-xs text-stone-400 hover:text-stone-700">
-                    清除全部筛选
+                    {t("conversations.clearAllFilters")}
                   </button>
                 </div>
               )}
@@ -463,7 +452,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                 </span>
               ))}
               <button onClick={clearAll} className="text-xs text-stone-400 hover:text-stone-600 px-1">
-                全部清除
+                {t("conversations.clearAll")}
               </button>
             </div>
           )}
@@ -479,7 +468,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                 <div className="flex items-center justify-center py-20">
                   <div className={`flex flex-col items-center gap-3 ${semanticMode ? "text-violet-400" : "text-stone-400"}`}>
                     {semanticMode ? <BrainCircuit size={24} className="animate-pulse" /> : <Loader2 size={24} className="animate-spin" />}
-                    <span className="text-sm">{semanticMode ? "语义搜索中…" : "搜索中…"}</span>
+                    <span className="text-sm">{semanticMode ? t("conversations.semanticSearching") : t("conversations.keywordSearching")}</span>
                   </div>
                 </div>
               )}
@@ -489,14 +478,14 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                   <div className={`flex h-16 w-16 items-center justify-center rounded-2xl ${semanticMode ? "bg-violet-50" : "bg-stone-100"}`}>
                     {semanticMode ? <BrainCircuit size={28} strokeWidth={1.5} className="text-violet-300" /> : <Search size={28} strokeWidth={1.5} />}
                   </div>
-                  <p className="font-medium text-stone-600">没有找到匹配的内容</p>
+                  <p className="font-medium text-stone-600">{t("conversations.noResults")}</p>
                 </div>
               )}
 
               {(hits.length > 0 || favHits.length > 0) && (
                 <div className="flex flex-col gap-2">
                   <p className="mb-1 text-xs text-stone-400">
-                    找到 {hits.length + favHits.length} 条结果
+                    {t("conversations.resultsFound", { n: hits.length + favHits.length })}
                   </p>
 
                   {hits.map((h) => {
@@ -520,21 +509,21 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                           ) : (
                             <Heading size={11} className="text-stone-400" />
                           )}
-                          <span className="text-xs text-stone-400">{formatDate(h.updated_at ?? h.created_at)}</span>
+                          <span className="text-xs text-stone-400">{formatRelativeDate(h.updated_at ?? h.created_at, lang, t)}</span>
                           {sim !== null && (
                             <span className="ml-auto flex items-center gap-1 rounded-full bg-violet-50 border border-violet-200 px-2 py-0.5 text-[11px] font-medium text-violet-600">
                               <BrainCircuit size={10} />
-                              {Math.round(sim * 100)}% 相似
+                              {t("conversations.similarity", { pct: Math.round(sim * 100) })}
                             </span>
                           )}
                           {sim === null && isMsg && (
                             <span className="ml-auto rounded border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] text-orange-600 opacity-0 transition-opacity group-hover:opacity-100">
-                              跳转到消息
+                              {t("conversations.jumpToMessage")}
                             </span>
                           )}
                         </div>
                         <h3 className="mb-1 line-clamp-1 text-sm font-semibold leading-snug text-stone-800 transition-colors group-hover:text-orange-700">
-                          {h.conversation_title || "（无标题对话）"}
+                          {h.conversation_title || t("common.untitledConversation")}
                         </h3>
                         {h.snippet && (
                           <p className="line-clamp-2 text-xs leading-relaxed text-stone-500">
@@ -553,15 +542,15 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                     >
                       <div className="mb-2 flex items-center gap-2">
                         <Star size={12} className="text-amber-500" fill="currentColor" />
-                        <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">收藏</span>
-                        {f.tags.slice(0, 3).map((t) => (
-                          <span key={t.id} className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-medium text-amber-700 border border-amber-200">
-                            #{t.name}
+                        <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">{t("common.favorite")}</span>
+                        {f.tags.slice(0, 3).map((tag) => (
+                          <span key={tag.id} className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-medium text-amber-700 border border-amber-200">
+                            #{tag.name}
                           </span>
                         ))}
                       </div>
                       <h3 className="mb-1 line-clamp-1 text-sm font-semibold leading-snug text-stone-800 transition-colors group-hover:text-amber-700">
-                        {f.conversation_title || "（无标题对话）"}
+                        {f.conversation_title || t("common.untitledConversation")}
                       </h3>
                       <p className="line-clamp-2 text-xs leading-relaxed text-stone-600">{f.selected_text}</p>
                     </Link>
@@ -575,7 +564,7 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                 <div className="flex items-center justify-center py-20">
                   <div className="flex flex-col items-center gap-3 text-stone-400">
                     <Loader2 size={24} className="animate-spin" />
-                    <span className="text-sm">加载中…</span>
+                    <span className="text-sm">{t("conversations.loadingConversations")}</span>
                   </div>
                 </div>
               )}
@@ -587,14 +576,14 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                   </div>
                   <div className="text-center">
                     <p className="font-medium text-stone-600">
-                      {activeFilters.length > 0 ? "没有找到匹配的对话" : "还没有导入任何对话"}
+                      {activeFilters.length > 0 ? t("conversations.noMatchingConversations") : t("conversations.noConversationsYet")}
                     </p>
                     {activeFilters.length === 0 && (
-                      <p className="mt-1 text-sm text-stone-400">点击左侧「导入对话数据」开始</p>
+                      <p className="mt-1 text-sm text-stone-400">{t("conversations.importHint")}</p>
                     )}
                     {activeFilters.length > 0 && (
                       <button onClick={clearAll} className="mt-2 text-sm text-orange-500 hover:underline">
-                        清除筛选条件
+                        {t("conversations.clearFilters")}
                       </button>
                     )}
                   </div>
@@ -612,17 +601,17 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                       <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${platformBadge[c.platform] ?? "bg-stone-100 text-stone-600 border-stone-200"}`}>
                         {platformLabel[c.platform] ?? c.platform}
                       </span>
-                      <span className="ml-auto text-xs text-stone-400">{formatDate(c.updated_at ?? c.created_at)}</span>
+                      <span className="ml-auto text-xs text-stone-400">{formatRelativeDate(c.updated_at ?? c.created_at, lang, t)}</span>
                     </div>
                     <h3 className="mb-1 line-clamp-2 text-sm font-semibold leading-snug text-stone-800 transition-colors group-hover:text-orange-700">
-                      {c.title || "（无标题对话）"}
+                      {c.title || t("common.untitledConversation")}
                     </h3>
                     {c.summary && (
                       <p className="mb-2 line-clamp-2 text-xs leading-relaxed text-stone-500">{c.summary}</p>
                     )}
                     <div className="mt-auto flex items-center gap-1 border-t border-stone-50 pt-2 text-xs text-stone-400">
                       <MessageSquare size={11} />
-                      <span>{c.message_count} 条消息</span>
+                      <span>{t("common.messageCount", { n: c.message_count })}</span>
                     </div>
                   </Link>
                 ))}

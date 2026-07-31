@@ -15,6 +15,7 @@ import {
   EyeOff,
   Loader2,
 } from "lucide-react";
+import { useI18n, type TranslationKey } from "../lib/i18n";
 
 type FieldRole = "input" | "output" | "meta" | "search" | "hidden";
 
@@ -78,12 +79,12 @@ const roleBadge: Record<FieldRole, string> = {
   hidden: "bg-red-50 text-red-400 border-red-100",
 };
 
-const roleLabel: Record<FieldRole, string> = {
-  input: "输入",
-  output: "输出",
-  meta: "元数据",
-  search: "可搜索",
-  hidden: "隐藏",
+const roleLabelKey: Record<FieldRole, TranslationKey> = {
+  input: "jsonViewer.roleInput",
+  output: "jsonViewer.roleOutput",
+  meta: "jsonViewer.roleMeta",
+  search: "jsonViewer.roleSearch",
+  hidden: "jsonViewer.roleHidden",
 };
 
 function RecordCard({
@@ -95,13 +96,14 @@ function RecordCard({
   fields: Record<string, FieldConfig>;
   index: number;
 }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const inputs = Object.entries(fields).filter(([, cfg]) => cfg.role === "input");
   const outputs = Object.entries(fields).filter(([, cfg]) => cfg.role === "output");
   const metas = Object.entries(fields).filter(([, cfg]) => cfg.role === "meta" || cfg.role === "search");
 
   const renderValue = (val: unknown, role: FieldRole) => {
-    if (val === null || val === undefined || val === "") return <span className="italic text-stone-400">空</span>;
+    if (val === null || val === undefined || val === "") return <span className="italic text-stone-400">{t("common.empty")}</span>;
     const str = typeof val === "object" ? JSON.stringify(val, null, 2) : String(val);
 
     if (role === "input" || role === "output") {
@@ -120,7 +122,7 @@ function RecordCard({
               }}
               className="mt-1 text-xs text-orange-500 hover:underline"
             >
-              展开全部
+              {t("jsonViewer.expandAll")}
             </button>
           </>
         );
@@ -158,7 +160,7 @@ function RecordCard({
           <div key={key} className="px-4 py-3">
             <div className="mb-1.5 flex items-center gap-2">
               <span className="text-xs font-medium text-blue-600">{cfg.label}</span>
-              <span className="rounded-full border px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-500 border-blue-100">输入</span>
+              <span className="rounded-full border px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-500 border-blue-100">{t("jsonViewer.input")}</span>
             </div>
             <div className="rounded-xl bg-blue-50 px-3 py-2.5">
               {renderValue(record[key], "input")}
@@ -170,7 +172,7 @@ function RecordCard({
           <div key={key} className="px-4 py-3">
             <div className="mb-1.5 flex items-center gap-2">
               <span className="text-xs font-medium text-emerald-600">{cfg.label}</span>
-              <span className="rounded-full border px-1.5 py-0.5 text-[10px] bg-emerald-50 text-emerald-500 border-emerald-100">输出</span>
+              <span className="rounded-full border px-1.5 py-0.5 text-[10px] bg-emerald-50 text-emerald-500 border-emerald-100">{t("jsonViewer.output")}</span>
             </div>
             <div className="rounded-xl bg-emerald-50 px-3 py-2.5">
               {renderValue(record[key], "output")}
@@ -181,7 +183,7 @@ function RecordCard({
         {expanded && (
           <div className="px-4 py-2">
             <button onClick={() => setExpanded(false)} className="text-xs text-stone-400 hover:text-stone-600">
-              收起
+              {t("jsonViewer.collapse")}
             </button>
           </div>
         )}
@@ -201,6 +203,7 @@ function FieldConfigPanel({
   onChange: (key: string, cfg: FieldConfig) => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const roles: FieldRole[] = ["input", "output", "meta", "search", "hidden"];
 
   return (
@@ -208,8 +211,8 @@ function FieldConfigPanel({
       <div className="w-[600px] max-h-[80vh] flex flex-col rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-stone-200 px-6 py-4">
           <div>
-            <h2 className="font-semibold text-stone-800">字段配置</h2>
-            <p className="text-xs text-stone-400 mt-0.5">指定每个字段的渲染角色</p>
+            <h2 className="font-semibold text-stone-800">{t("jsonViewer.fieldConfigTitle")}</h2>
+            <p className="text-xs text-stone-400 mt-0.5">{t("jsonViewer.fieldConfigSubtitle")}</p>
           </div>
           <button onClick={onClose} className="rounded-full p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-600">
             <X size={18} />
@@ -224,7 +227,7 @@ function FieldConfigPanel({
                   <code className="text-sm font-mono font-medium text-stone-800">{s.name}</code>
                   <span className="text-xs text-stone-400">{s.type}</span>
                   <span className="ml-auto text-xs text-stone-400">
-                    覆盖率 {Math.round(s.coverage * 100)}%
+                    {t("jsonViewer.coverage", { pct: Math.round(s.coverage * 100) })}
                   </span>
                 </div>
                 {s.sample && (
@@ -239,7 +242,7 @@ function FieldConfigPanel({
                         cfg.role === r ? roleBadge[r] : "border-stone-200 bg-white text-stone-500 hover:bg-stone-100"
                       }`}
                     >
-                      {roleLabel[r]}
+                      {t(roleLabelKey[r])}
                     </button>
                   ))}
                 </div>
@@ -247,7 +250,7 @@ function FieldConfigPanel({
                   <input
                     value={cfg.label}
                     onChange={(e) => onChange(s.name, { ...cfg, label: e.target.value })}
-                    placeholder="显示标签"
+                    placeholder={t("jsonViewer.displayLabelPlaceholder")}
                     className="w-full rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs outline-none focus:ring-1 focus:ring-orange-200"
                   />
                 </div>
@@ -266,6 +269,7 @@ interface JsonViewerProps {
 }
 
 export function JsonViewer({ pendingFilePath, onFileLoaded }: JsonViewerProps) {
+  const { t } = useI18n();
   const [records, setRecords] = useState<Record<string, unknown>[]>([]);
   const [stats, setStats] = useState<FieldStats[]>([]);
   const [configs, setConfigs] = useState<Record<string, FieldConfig>>({});
@@ -294,10 +298,10 @@ export function JsonViewer({ pendingFilePath, onFileLoaded }: JsonViewerProps) {
         try {
           ingestJson(text);
         } catch {
-          alert("JSON 解析失败，请确认文件格式正确");
+          alert(t("jsonViewer.parseFailedAlert"));
         }
       })
-      .catch(() => alert("读取文件失败"))
+      .catch(() => alert(t("jsonViewer.readFailedAlert")))
       .finally(() => {
         setPathLoading(false);
         onFileLoaded?.();
@@ -311,7 +315,7 @@ export function JsonViewer({ pendingFilePath, onFileLoaded }: JsonViewerProps) {
       try {
         ingestJson(e.target?.result as string);
       } catch {
-        alert("JSON 解析失败，请确认文件格式正确");
+        alert(t("jsonViewer.parseFailedAlert"));
       }
     };
     reader.readAsText(file);
@@ -345,7 +349,7 @@ export function JsonViewer({ pendingFilePath, onFileLoaded }: JsonViewerProps) {
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-600">
               <FileJson size={15} />
             </div>
-            <h1 className="text-lg font-semibold text-stone-800">JSON 数据查看器</h1>
+            <h1 className="text-lg font-semibold text-stone-800">{t("jsonViewer.title")}</h1>
           </div>
           <div className="flex items-center gap-2">
             {records.length > 0 && (
@@ -355,14 +359,14 @@ export function JsonViewer({ pendingFilePath, onFileLoaded }: JsonViewerProps) {
                   className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs text-stone-600 hover:bg-white"
                 >
                   {showStats ? <EyeOff size={13} /> : <Eye size={13} />}
-                  字段统计
+                  {t("jsonViewer.fieldStats")}
                 </button>
                 <button
                   onClick={() => setShowConfig(true)}
                   className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs text-violet-700 hover:bg-violet-100"
                 >
                   <Settings size={13} />
-                  配置字段
+                  {t("jsonViewer.configureFields")}
                 </button>
               </>
             )}
@@ -371,7 +375,7 @@ export function JsonViewer({ pendingFilePath, onFileLoaded }: JsonViewerProps) {
               className="flex items-center gap-1.5 rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-stone-800"
             >
               <Upload size={13} />
-              上传 JSON
+              {t("jsonViewer.uploadJson")}
             </button>
             <input
               ref={fileRef}
@@ -394,12 +398,12 @@ export function JsonViewer({ pendingFilePath, onFileLoaded }: JsonViewerProps) {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索输入/输出内容…"
+                placeholder={t("jsonViewer.searchPlaceholder")}
                 className="h-9 w-full rounded-xl border border-stone-200 bg-stone-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-orange-300 focus:bg-white focus:ring-2 focus:ring-orange-100"
               />
             </div>
             <span className="text-xs text-stone-400 whitespace-nowrap">
-              {filtered.length} / {records.length} 条
+              {t("jsonViewer.countOfTotal", { filtered: filtered.length, total: records.length })}
             </span>
           </div>
         )}
@@ -434,7 +438,7 @@ export function JsonViewer({ pendingFilePath, onFileLoaded }: JsonViewerProps) {
           <div className="flex h-full items-center justify-center">
             <div className="flex flex-col items-center gap-3 text-stone-400">
               <Loader2 size={28} className="animate-spin text-violet-400" />
-              <span className="text-sm">正在读取文件…</span>
+              <span className="text-sm">{t("jsonViewer.readingFile")}</span>
             </div>
           </div>
         ) : records.length === 0 ? (
@@ -451,17 +455,17 @@ export function JsonViewer({ pendingFilePath, onFileLoaded }: JsonViewerProps) {
               <FileJson size={36} strokeWidth={1.2} />
             </div>
             <div className="text-center">
-              <p className="font-semibold text-stone-700">拖拽 JSON 文件到这里</p>
-              <p className="mt-1 text-sm text-stone-400">或点击右上角「上传 JSON」按钮选择文件</p>
+              <p className="font-semibold text-stone-700">{t("jsonViewer.dropHintTitle")}</p>
+              <p className="mt-1 text-sm text-stone-400">{t("jsonViewer.dropHintSubtitle")}</p>
               <p className="mt-3 text-xs text-stone-400 max-w-sm">
-                支持 JSON 数组格式。自动分析字段，可配置输入/输出/搜索字段，快速浏览训练数据、评测结果等。
+                {t("jsonViewer.dropHintDesc")}
               </p>
             </div>
             <button
               onClick={() => fileRef.current?.click()}
               className="rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-violet-700"
             >
-              选择文件
+              {t("jsonViewer.chooseFile")}
             </button>
           </div>
         ) : (
@@ -469,7 +473,7 @@ export function JsonViewer({ pendingFilePath, onFileLoaded }: JsonViewerProps) {
             {filtered.length === 0 ? (
               <div className="py-16 text-center text-stone-400">
                 <Search size={28} className="mx-auto mb-3 opacity-50" strokeWidth={1.5} />
-                <p className="text-sm">没有找到匹配的记录</p>
+                <p className="text-sm">{t("jsonViewer.noMatchingRecords")}</p>
               </div>
             ) : (
               filtered.map((r, i) => (

@@ -5,15 +5,10 @@ import { ArrowLeft, ExternalLink, Star, MessageSquare, Copy, Check } from "lucid
 import { api, type ConversationSummary, type MessageRow } from "../lib/api";
 import { FavoriteModal } from "../components/FavoriteModal";
 import { MessageBubble } from "../components/MessageBubble";
-
-function formatDate(iso: string | null) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
-}
+import { useI18n, formatLongDate } from "../lib/i18n";
 
 export function ConversationDetail() {
+  const { t, lang } = useI18n();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -78,14 +73,14 @@ export function ConversationDetail() {
       <div className="flex h-full items-center justify-center">
         <div className="flex flex-col items-center gap-3 text-stone-400">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-stone-300 border-t-orange-400" />
-          <span className="text-sm">加载中…</span>
+          <span className="text-sm">{t("conversationDetail.loading")}</span>
         </div>
       </div>
     );
   }
 
   if (!conv) {
-    return <div className="flex h-full items-center justify-center text-sm text-stone-400">未找到该对话</div>;
+    return <div className="flex h-full items-center justify-center text-sm text-stone-400">{t("conversationDetail.notFound")}</div>;
   }
 
   const platformLabel =
@@ -121,11 +116,11 @@ export function ConversationDetail() {
           {platformLabel[0]}
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="truncate font-semibold text-stone-800">{conv.title || "（无标题对话）"}</h1>
+          <h1 className="truncate font-semibold text-stone-800">{conv.title || t("common.untitledConversation")}</h1>
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-xs text-stone-400">
-              {platformLabel} · {conv.message_count} 条消息
-              {conv.updated_at ? ` · ${formatDate(conv.updated_at)}` : ""}
+              {platformLabel} · {t("common.messageCount", { n: conv.message_count })}
+              {conv.updated_at ? ` · ${formatLongDate(conv.updated_at, lang)}` : ""}
             </p>
             <button
               onClick={() => {
@@ -133,7 +128,7 @@ export function ConversationDetail() {
                 setIdCopied(true);
                 setTimeout(() => setIdCopied(false), 1800);
               }}
-              title="复制对话 ID"
+              title={t("conversationDetail.copyId")}
               className="flex items-center gap-1 rounded-md bg-stone-100 px-1.5 py-0.5 font-mono text-[10px] text-stone-400 transition-colors hover:bg-stone-200 hover:text-stone-600"
             >
               {idCopied ? <Check size={9} /> : <Copy size={9} />}
@@ -148,7 +143,7 @@ export function ConversationDetail() {
               className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-600 transition-colors hover:bg-stone-50 hover:text-stone-800"
             >
               <ExternalLink size={13} />
-              继续对话
+              {t("conversationDetail.continueConversation")}
             </button>
           )}
         </div>
@@ -160,7 +155,7 @@ export function ConversationDetail() {
           {messages.length === 0 && (
             <div className="flex flex-col items-center gap-3 py-16 text-stone-400">
               <MessageSquare size={32} strokeWidth={1.5} />
-              <p className="text-sm">此对话没有消息</p>
+              <p className="text-sm">{t("conversationDetail.noMessages")}</p>
             </div>
           )}
           <div className="flex flex-col gap-5">
@@ -180,14 +175,14 @@ export function ConversationDetail() {
       {selection && (
         <div className="pointer-events-none fixed inset-x-0 bottom-8 flex justify-center z-50">
           <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-stone-900/95 px-4 py-2.5 text-sm text-white shadow-2xl animate-fade-in backdrop-blur-sm">
-            <span className="max-w-[240px] truncate text-stone-300 text-xs">已选中文本</span>
+            <span className="max-w-[240px] truncate text-stone-300 text-xs">{t("conversationDetail.textSelected")}</span>
             <div className="h-4 w-px bg-stone-700" />
             <button
               onClick={() => setFavoriteTarget(selection)}
               className="flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1 text-xs font-medium hover:bg-amber-400 transition-colors"
             >
               <Star size={12} />
-              收藏片段
+              {t("conversationDetail.saveSnippet")}
             </button>
             <button onClick={() => setSelection(null)} className="text-stone-500 hover:text-stone-300 transition-colors">
               ✕

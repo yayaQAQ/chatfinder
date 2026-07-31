@@ -6,6 +6,7 @@ import rehypeHighlight from "rehype-highlight";
 import { Check, Copy, User, Bot, X, ZoomIn } from "lucide-react";
 import type { MessageRow } from "../lib/api";
 import { markdownUrlTransform } from "../lib/markdown";
+import { useI18n, formatDateTime } from "../lib/i18n";
 
 function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
   useEffect(() => {
@@ -39,6 +40,7 @@ function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CodeBlock({ children, ...props }: any) {
+  const { t } = useI18n();
   const preRef = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
 
@@ -64,7 +66,7 @@ function CodeBlock({ children, ...props }: any) {
           className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] text-stone-400 transition-colors hover:bg-white/10 hover:text-stone-200"
         >
           {copied ? <Check size={11} /> : <Copy size={11} />}
-          {copied ? "已复制" : "复制"}
+          {copied ? t("messageBubble.copied") : t("messageBubble.copy")}
         </button>
       </div>
       <pre
@@ -168,6 +170,7 @@ export function MessageBubble({
   platform: string;
   highlighted?: boolean;
 }) {
+  const { t, lang } = useI18n();
   const isHuman = message.sender === "human";
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   // Stable reference so ReactMarkdown doesn't treat these as new component
@@ -209,17 +212,12 @@ export function MessageBubble({
             components={markdownComponents}
             urlTransform={markdownUrlTransform}
           >
-            {message.text || "_(空消息)_"}
+            {message.text || t("messageBubble.emptyMessage")}
           </ReactMarkdown>
         </div>
         {message.created_at && (
           <div className={`mt-1.5 text-[11px] text-stone-400 ${isHuman ? "text-right" : ""}`}>
-            {new Date(message.created_at).toLocaleString("zh-CN", {
-              month: "numeric",
-              day: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            {formatDateTime(message.created_at, lang)}
           </div>
         )}
       </div>

@@ -9,19 +9,7 @@ import remarkGfm from "remark-gfm";
 import { api, type FavoriteRow, type TagRow } from "../lib/api";
 import { useToast } from "../lib/toast";
 import { markdownUrlTransform } from "../lib/markdown";
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
-  const diff = Math.floor((Date.now() - d.getTime()) / 86400000);
-  if (diff === 0) return "今天";
-  if (diff === 1) return "昨天";
-  if (diff < 7)  return `${diff} 天前`;
-  if (diff < 365) return d.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
-  return d.toLocaleDateString("zh-CN", { year: "numeric", month: "numeric", day: "numeric" });
-}
+import { useI18n, formatRelativeDate } from "../lib/i18n";
 
 // ── Detail Modal ──────────────────────────────────────────────────────────────
 
@@ -36,6 +24,7 @@ function FavoriteModal({
   onRemove: () => void;
   onTagClick: (id: number) => void;
 }) {
+  const { t, lang } = useI18n();
   const navigate = useNavigate();
   const convUrl = f.message_id
     ? `/conversation/${f.conversation_id}?msg=${encodeURIComponent(f.message_id)}`
@@ -63,15 +52,15 @@ function FavoriteModal({
           <div className="min-w-0 flex-1">
             <div className="mb-1 flex items-center gap-2">
               <Star size={13} className="shrink-0 text-amber-400" fill="currentColor" />
-              <span className="text-xs text-stone-400">{formatDate(f.created_at)}</span>
+              <span className="text-xs text-stone-400">{formatRelativeDate(f.created_at, lang, t)}</span>
               {f.message_id && (
                 <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-200">
-                  定位到消息
+                  {t("favorites.linkedToMessage")}
                 </span>
               )}
             </div>
             <p className="truncate text-sm font-semibold text-stone-700">
-              {f.conversation_title || "（无标题对话）"}
+              {f.conversation_title || t("common.untitledConversation")}
             </p>
           </div>
           <button
@@ -105,13 +94,13 @@ function FavoriteModal({
           {/* Tags */}
           {f.tags.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2">
-              {f.tags.map((t) => (
+              {f.tags.map((tag) => (
                 <button
-                  key={t.id}
-                  onClick={() => { onClose(); onTagClick(t.id); }}
+                  key={tag.id}
+                  onClick={() => { onClose(); onTagClick(tag.id); }}
                   className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-200 transition-colors hover:bg-amber-100"
                 >
-                  #{t.name}
+                  #{tag.name}
                 </button>
               ))}
             </div>
@@ -125,14 +114,14 @@ function FavoriteModal({
             className="flex items-center gap-1.5 rounded-xl border border-stone-200 px-3 py-2 text-sm text-stone-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
           >
             <Trash2 size={14} />
-            移除收藏
+            {t("favorites.removeFavorite")}
           </button>
           <button
             onClick={goToConv}
             className="ml-auto flex items-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90"
           >
             <MessageSquare size={14} />
-            {f.message_id ? "跳到消息" : "查看对话"}
+            {f.message_id ? t("favorites.jumpToMessage") : t("favorites.viewConversation")}
             <ArrowUpRight size={13} />
           </button>
         </div>
@@ -150,6 +139,7 @@ function FavoriteCard({
   f: FavoriteRow;
   onClick: () => void;
 }) {
+  const { t, lang } = useI18n();
   return (
     <button
       onClick={onClick}
@@ -164,10 +154,10 @@ function FavoriteCard({
           <div className="min-w-0 flex-1">
             <div className="mb-0.5 flex items-center gap-1.5">
               <Star size={10} className="shrink-0 text-amber-400" fill="currentColor" />
-              <span className="text-[11px] text-stone-400">{formatDate(f.created_at)}</span>
+              <span className="text-[11px] text-stone-400">{formatRelativeDate(f.created_at, lang, t)}</span>
             </div>
             <p className="truncate text-xs font-medium text-stone-500">
-              {f.conversation_title || "（无标题对话）"}
+              {f.conversation_title || t("common.untitledConversation")}
             </p>
           </div>
           <ExternalLink size={12} className="mt-0.5 shrink-0 text-stone-300 transition-colors group-hover:text-amber-400" />
@@ -181,12 +171,12 @@ function FavoriteCard({
         {/* Tags */}
         {f.tags.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {f.tags.map((t) => (
+            {f.tags.map((tag) => (
               <span
-                key={t.id}
+                key={tag.id}
                 className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-200"
               >
-                #{t.name}
+                #{tag.name}
               </span>
             ))}
           </div>
@@ -194,7 +184,7 @@ function FavoriteCard({
 
         {f.note && (
           <p className="line-clamp-1 text-[11px] italic text-stone-400">
-            备注：{f.note}
+            {t("favorites.noteLabel", { note: f.note })}
           </p>
         )}
       </div>
@@ -213,11 +203,12 @@ export function Favorites() {
   const [organizing, setOrganizing] = useState(false);
   const [selected, setSelected]     = useState<FavoriteRow | null>(null);
   const { push } = useToast();
+  const { t } = useI18n();
 
   const reload = () => {
     setLoading(true);
     Promise.all([api.listFavorites(activeTag), api.listTags()])
-      .then(([f, t]) => { setFavorites(f); setTags(t); })
+      .then(([f, tagRows]) => { setFavorites(f); setTags(tagRows); })
       .finally(() => setLoading(false));
   };
 
@@ -225,7 +216,7 @@ export function Favorites() {
 
   const remove = async (id: string) => {
     await api.deleteFavorite(id);
-    push("已移除收藏", "success");
+    push(t("favorites.removedToast"), "success");
     reload();
   };
 
@@ -233,7 +224,7 @@ export function Favorites() {
     setOrganizing(true);
     try {
       const count = await api.autoOrganizeFavorites();
-      push(`已为 ${count} 条未分类收藏自动打标签`, "success");
+      push(t("favorites.autoOrganizeToast", { n: count }), "success");
       reload();
     } finally {
       setOrganizing(false);
@@ -257,9 +248,9 @@ export function Favorites() {
         <div className="mb-3 flex items-center justify-between">
           <h1 className="flex items-center gap-2 text-lg font-semibold text-stone-800">
             <Star size={17} className="text-amber-500" fill="currentColor" />
-            收藏夹
+            {t("favorites.title")}
             {!loading && (
-              <span className="text-sm font-normal text-stone-400">{favorites.length} 条</span>
+              <span className="text-sm font-normal text-stone-400">{t("favorites.countSuffix", { n: favorites.length })}</span>
             )}
           </h1>
           <button
@@ -268,7 +259,7 @@ export function Favorites() {
             className="flex items-center gap-1.5 rounded-lg border border-stone-200 px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-100 disabled:opacity-60"
           >
             <Sparkles size={14} />
-            {organizing ? "整理中…" : "自动整理标签"}
+            {organizing ? t("favorites.organizing") : t("favorites.autoOrganize")}
           </button>
         </div>
 
@@ -278,7 +269,7 @@ export function Favorites() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索收藏内容、备注、对话标题…"
+            placeholder={t("favorites.searchPlaceholder")}
             className="h-8 w-full rounded-lg border border-stone-200 bg-stone-50 pl-8 pr-8 text-sm outline-none transition-colors focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
           />
           {query && (
@@ -296,17 +287,17 @@ export function Favorites() {
               activeTag === null ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-600 hover:bg-stone-200"
             }`}
           >
-            全部
+            {t("favorites.all")}
           </button>
-          {tags.map((t) => (
+          {tags.map((tag) => (
             <button
-              key={t.id}
-              onClick={() => setActiveTag(activeTag === t.id ? null : t.id)}
+              key={tag.id}
+              onClick={() => setActiveTag(activeTag === tag.id ? null : tag.id)}
               className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                activeTag === t.id ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                activeTag === tag.id ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-600 hover:bg-stone-200"
               }`}
             >
-              #{t.name}
+              #{tag.name}
             </button>
           ))}
         </div>
@@ -314,15 +305,15 @@ export function Favorites() {
 
       {/* ── Grid ── */}
       <div className="flex-1 overflow-y-auto px-6 py-5">
-        {loading && <div className="py-16 text-center text-sm text-stone-400">加载中…</div>}
+        {loading && <div className="py-16 text-center text-sm text-stone-400">{t("favorites.loading")}</div>}
 
         {!loading && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-3 py-24 text-stone-400">
             <TagIcon size={32} />
             <p className="text-sm">
               {query
-                ? `没有匹配"${query}"的收藏内容`
-                : "还没有收藏内容。在对话中选中文字，点击「收藏」即可保存到这里。"}
+                ? t("favorites.noMatchQuoted", { query })
+                : t("favorites.noFavoritesYet")}
             </p>
           </div>
         )}

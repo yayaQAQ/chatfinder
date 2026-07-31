@@ -821,22 +821,29 @@ pub async fn semantic_search(
 // Read-only: walk the known agent directories and report how many sessions
 // each holds. Runs off-thread since it touches the filesystem.
 #[tauri::command]
-pub async fn scan_agent_sources() -> Result<Vec<AgentSource>, String> {
-    tauri::async_runtime::spawn_blocking(agent_scan::scan_agent_sources)
+pub async fn scan_agent_sources(
+    overrides: Option<std::collections::HashMap<String, String>>,
+) -> Result<Vec<AgentSource>, String> {
+    let overrides = overrides.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || agent_scan::scan_agent_sources(&overrides))
         .await
         .map_err(|e| e.to_string())
 }
 
 // Parse the selected tools' sessions and persist them into the conversation
 // store. Mirrors import_zip_file: blocking work off the main thread, progress
-// over a dedicated Channel to preserve event ordering.
+// over a dedicated Channel to preserve event ordering. `overrides` carries any
+// directories the user picked manually in this dialog session (see
+// scan_agent_sources) — not persisted, the frontend re-supplies them.
 #[tauri::command]
 pub async fn import_agent_sessions(
     app: tauri::AppHandle,
     tools: Vec<String>,
+    overrides: Option<std::collections::HashMap<String, String>>,
     on_progress: Channel<ImportProgress>,
 ) -> Result<ImportSummary, String> {
     let batch_id = Uuid::new_v4().to_string();
+    let overrides = overrides.unwrap_or_default();
     on_progress
         .send(ImportProgress { current: 0, total: 0, phase: "parse".to_string() })
         .ok();
@@ -847,6 +854,7 @@ pub async fn import_agent_sessions(
         agent_scan::import_agent_sessions(
             &mut conn,
             &tools,
+            &overrides,
             &batch_id,
             Some(&move |current, total| {
                 on_progress

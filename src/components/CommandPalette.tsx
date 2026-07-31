@@ -4,6 +4,7 @@ import { Search, MessageSquare, Clock, X, FileText, Heading, Star, History, Brai
 import { api, type ConversationSummary, type SearchHit, type FavoriteRow, type EmbedConfig } from "../lib/api";
 import { FtsSnippet, QuerySnippet } from "../lib/highlight";
 import { getRecentSearches, addRecentSearch, removeRecentSearch } from "../lib/searchHistory";
+import { useI18n, formatCompactRelativeDate } from "../lib/i18n";
 
 interface Props {
   onClose: () => void;
@@ -22,16 +23,6 @@ const platformLabel: Record<string, string> = {
   "claude-code": "Claude Code", codex: "Codex",
 };
 
-function formatDate(iso: string | null) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  const days = Math.floor(diff / 86400000);
-  if (days === 0) return "今天";
-  if (days < 7) return `${days}天前`;
-  return d.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
-}
-
 // Unified item shape for keyboard nav
 type Item =
   | { kind: "conv"; data: ConversationSummary }
@@ -39,6 +30,7 @@ type Item =
   | { kind: "fav"; data: FavoriteRow };
 
 export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
+  const { t, lang } = useI18n();
   const [query, setQuery] = useState("");
   const [recent, setRecent] = useState<ConversationSummary[]>([]);
   const [hits, setHits]       = useState<SearchHit[]>([]);
@@ -182,7 +174,7 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
             onChange={(e) => setQuery(e.target.value)}
             onCompositionStart={() => setIsComposing(true)}
             onCompositionEnd={(e) => { setIsComposing(false); setQuery(e.currentTarget.value); }}
-            placeholder={semanticMode ? "描述你想找的内容，例如：关于机器学习的对话…" : "搜索对话标题或消息内容…"}
+            placeholder={semanticMode ? t("commandPalette.searchPlaceholderSemantic") : t("commandPalette.searchPlaceholderKeyword")}
             className="flex-1 bg-transparent text-base text-stone-800 outline-none placeholder:text-stone-400"
           />
           {query && (
@@ -196,7 +188,7 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
           {embedAvail && (
             <button
               onClick={() => setSemanticMode((m) => !m)}
-              title={semanticMode ? "切换回关键词搜索" : "切换到语义搜索（AI）"}
+              title={semanticMode ? t("commandPalette.toggleToKeyword") : t("commandPalette.toggleToSemantic")}
               className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition-colors ${
                 semanticMode
                   ? "border-violet-300 bg-violet-100 text-violet-700"
@@ -236,7 +228,7 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
           {!query.trim() && !semanticMode && (
             <div className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-stone-400">
               <Clock size={12} />
-              最近对话
+              {t("commandPalette.recentConversations")}
             </div>
           )}
 
@@ -246,20 +238,20 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
                 <BrainCircuit size={26} strokeWidth={1.5} className="text-violet-400" />
               </div>
               <div className="text-center">
-                <p className="font-medium text-stone-600">语义搜索模式</p>
-                <p className="mt-1 text-sm text-stone-400">用自然语言描述你想找的对话内容</p>
+                <p className="font-medium text-stone-600">{t("commandPalette.semanticModeTitle")}</p>
+                <p className="mt-1 text-sm text-stone-400">{t("commandPalette.semanticModeDesc")}</p>
               </div>
             </div>
           )}
 
           {query.trim() && !semanticMode && hits.length === 0 && favHits.length === 0 && !loading && (
-            <div className="py-10 text-center text-sm text-stone-400">没有找到匹配的对话</div>
+            <div className="py-10 text-center text-sm text-stone-400">{t("commandPalette.noMatchingConversations")}</div>
           )}
 
           {query.trim() && semanticMode && semanticHits.length === 0 && !semanticLoading && (
             <div className="flex flex-col items-center gap-2 py-10 text-stone-400">
               <BrainCircuit size={20} className="text-violet-300" />
-              <span className="text-sm">未找到相关对话</span>
+              <span className="text-sm">{t("commandPalette.noRelatedFound")}</span>
             </div>
           )}
 
@@ -275,10 +267,10 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
                     {platformLabel[c.platform] ?? c.platform}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-stone-800">{c.title || "（无标题对话）"}</div>
+                    <div className="truncate text-sm font-medium text-stone-800">{c.title || t("common.untitledConversation")}</div>
                     {c.summary && <div className="mt-0.5 truncate text-xs text-stone-500">{c.summary}</div>}
                   </div>
-                  <div className="shrink-0 text-xs text-stone-400">{formatDate(c.updated_at ?? c.created_at)}</div>
+                  <div className="shrink-0 text-xs text-stone-400">{formatCompactRelativeDate(c.updated_at ?? c.created_at, lang, t)}</div>
                   <div className="shrink-0 flex items-center gap-1 text-xs text-stone-400">
                     <MessageSquare size={11} />{c.message_count}
                   </div>
@@ -293,22 +285,22 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
                 <button key={`fav-${f.id}`} data-idx={i} onClick={() => open(item)} onMouseEnter={() => setActive(i)} className={base}>
                   <Star size={14} className="mt-0.5 shrink-0 text-amber-500" fill="currentColor" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-stone-700">{f.conversation_title || "（无标题对话）"}</div>
+                    <div className="truncate text-sm font-medium text-stone-700">{f.conversation_title || t("common.untitledConversation")}</div>
                     <div className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-stone-500">
                       {f.selected_text.slice(0, 120)}
                     </div>
                     {f.tags.length > 0 && (
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {f.tags.map((t) => (
-                          <span key={t.id} className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-                            #{t.name}
+                        {f.tags.map((tag) => (
+                          <span key={tag.id} className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                            #{tag.name}
                           </span>
                         ))}
                       </div>
                     )}
                   </div>
                   <span className="mt-1 shrink-0 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-600">
-                    收藏
+                    {t("common.favorite")}
                   </span>
                 </button>
               );
@@ -331,7 +323,7 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
                     : <Heading size={11} className="text-stone-400" />}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-stone-700">{h.conversation_title || "（无标题对话）"}</div>
+                  <div className="truncate text-sm font-medium text-stone-700">{h.conversation_title || t("common.untitledConversation")}</div>
                   {h.snippet && (
                     <div className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-stone-500">
                       {sim !== null ? <QuerySnippet text={h.snippet} query={query} /> : <FtsSnippet text={h.snippet} />}
@@ -340,11 +332,11 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
                 </div>
                 {sim !== null ? (
                   <span className="mt-1 shrink-0 flex items-center gap-1 rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-600">
-                    {Math.round(sim * 100)}% 相似
+                    {t("commandPalette.similarity", { pct: Math.round(sim * 100) })}
                   </span>
                 ) : isMsg && (
                   <span className="mt-1 shrink-0 rounded border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] text-orange-600">
-                    跳转到消息
+                    {t("commandPalette.jumpToMessage")}
                   </span>
                 )}
               </button>
@@ -354,10 +346,10 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
 
         {/* Footer */}
         <div className="flex items-center gap-4 border-t border-stone-100 bg-stone-50 px-4 py-2 text-[11px] text-stone-400">
-          <span className="flex items-center gap-1"><kbd className="rounded border border-stone-200 bg-white px-1 py-0.5">↑↓</kbd> 选择</span>
-          <span className="flex items-center gap-1"><kbd className="rounded border border-stone-200 bg-white px-1 py-0.5">↵</kbd> 打开</span>
-          <span className="flex items-center gap-1"><kbd className="rounded border border-stone-200 bg-white px-1 py-0.5">ESC</kbd> 关闭</span>
-          <span className="ml-auto">{items.length} 条结果</span>
+          <span className="flex items-center gap-1"><kbd className="rounded border border-stone-200 bg-white px-1 py-0.5">↑↓</kbd> {t("commandPalette.footerSelect")}</span>
+          <span className="flex items-center gap-1"><kbd className="rounded border border-stone-200 bg-white px-1 py-0.5">↵</kbd> {t("commandPalette.footerOpen")}</span>
+          <span className="flex items-center gap-1"><kbd className="rounded border border-stone-200 bg-white px-1 py-0.5">ESC</kbd> {t("commandPalette.footerClose")}</span>
+          <span className="ml-auto">{t("commandPalette.resultsCount", { n: items.length })}</span>
         </div>
       </div>
     </div>

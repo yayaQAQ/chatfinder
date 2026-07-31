@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X, Star } from "lucide-react";
 import { api } from "../lib/api";
 import { useToast } from "../lib/toast";
+import { useI18n } from "../lib/i18n";
 
 export function FavoriteModal({
   conversationId,
@@ -20,6 +21,7 @@ export function FavoriteModal({
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const { push } = useToast();
+  const { t } = useI18n();
 
   useEffect(() => {
     api.suggestTags(selectedText).then((tags) => setTagsInput(tags.join(", ")));
@@ -33,11 +35,11 @@ export function FavoriteModal({
         .map((t) => t.trim())
         .filter(Boolean);
       await api.createFavorite(conversationId, messageId, selectedText, note, tagNames);
-      push("已添加到收藏", "success");
+      push(t("favoriteModal.savedToast"), "success");
       onSaved();
       onClose();
     } catch (e) {
-      push(`收藏失败：${e}`, "error");
+      push(t("favoriteModal.failToast", { error: String(e) }), "error");
     } finally {
       setSaving(false);
     }
@@ -49,7 +51,7 @@ export function FavoriteModal({
         <div className="mb-3 flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-base font-semibold text-stone-800">
             <Star size={16} className="text-amber-500" />
-            添加到收藏
+            {t("favoriteModal.title")}
           </h2>
           <button onClick={onClose} className="rounded-full p-1 text-stone-400 hover:bg-stone-100">
             <X size={16} />
@@ -60,15 +62,15 @@ export function FavoriteModal({
           {selectedText}
         </div>
 
-        <label className="mb-1 block text-xs font-medium text-stone-500">标签（逗号分隔，可编辑）</label>
+        <label className="mb-1 block text-xs font-medium text-stone-500">{t("favoriteModal.tagsLabel")}</label>
         <input
           value={tagsInput}
           onChange={(e) => setTagsInput(e.target.value)}
-          placeholder="例如：API设计, 灵感"
+          placeholder={t("favoriteModal.tagsPlaceholder")}
           className="mb-3 w-full rounded-lg border border-stone-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-orange-200"
         />
 
-        <label className="mb-1 block text-xs font-medium text-stone-500">备注（可选）</label>
+        <label className="mb-1 block text-xs font-medium text-stone-500">{t("favoriteModal.noteLabel")}</label>
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
@@ -81,7 +83,7 @@ export function FavoriteModal({
           disabled={saving}
           className="w-full rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:opacity-60"
         >
-          {saving ? "保存中…" : "保存收藏"}
+          {saving ? t("favoriteModal.saving") : t("favoriteModal.save")}
         </button>
       </div>
     </div>

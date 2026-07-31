@@ -77,10 +77,14 @@ export interface EmbedConfig {
 export interface AgentSource {
   tool: string;          // "claude-code" | "codex"
   label: string;         // "Claude Code" | "Codex"
-  dir: string;           // absolute directory scanned
+  dir: string;           // absolute directory scanned (empty if unresolvable)
   session_count: number;
   message_count: number;
+  accessible: boolean;   // false if the directory couldn't be read at all
 }
+
+// tool -> directory, picked manually via a folder dialog this session (not persisted)
+export type AgentDirOverrides = Record<string, string>;
 
 export type SortOption = "newest" | "oldest" | "most_messages" | "fewest_messages";
 
@@ -105,11 +109,16 @@ export const api = {
     channel.onmessage = onProgress;
     return invoke<ImportSummary>("import_zip_file", { zipPath, onProgress: channel });
   },
-  scanAgentSources: () => invoke<AgentSource[]>("scan_agent_sources"),
-  importAgentSessions: (tools: string[], onProgress: (p: ImportProgress) => void) => {
+  scanAgentSources: (overrides?: AgentDirOverrides) =>
+    invoke<AgentSource[]>("scan_agent_sources", { overrides: overrides ?? {} }),
+  importAgentSessions: (
+    tools: string[],
+    onProgress: (p: ImportProgress) => void,
+    overrides?: AgentDirOverrides,
+  ) => {
     const channel = new Channel<ImportProgress>();
     channel.onmessage = onProgress;
-    return invoke<ImportSummary>("import_agent_sessions", { tools, onProgress: channel });
+    return invoke<ImportSummary>("import_agent_sessions", { tools, overrides: overrides ?? {}, onProgress: channel });
   },
   listConversations: (filter: ConversationFilter, limit: number, offset: number) =>
     invoke<ConversationSummary[]>("list_conversations", {

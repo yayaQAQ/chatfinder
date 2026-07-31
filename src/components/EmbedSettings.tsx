@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { X, BrainCircuit, Plug, Cpu, KeyRound, PlayCircle, CheckCircle2, AlertCircle } from "lucide-react";
 import { api, type EmbeddingStats } from "../lib/api";
 import { useToast } from "../lib/toast";
+import { useI18n, type TranslationKey } from "../lib/i18n";
 
 interface Props {
   onClose: () => void;
@@ -11,13 +12,14 @@ interface Props {
 
 interface Progress { current: number; total: number; }
 
-const PRESETS = [
-  { label: "Ollama (本地)", url: "http://127.0.0.1:11434", model: "nomic-embed-text" },
+const PRESETS: { labelKey?: TranslationKey; label?: string; url: string; model: string }[] = [
+  { labelKey: "embedSettings.presetOllama", url: "http://127.0.0.1:11434", model: "nomic-embed-text" },
   { label: "OpenAI", url: "https://api.openai.com", model: "text-embedding-3-small" },
   { label: "Jina AI", url: "https://api.jina.ai", model: "jina-embeddings-v3" },
 ];
 
 export function EmbedSettings({ onClose, onStatsChange }: Props) {
+  const { t } = useI18n();
   const [apiUrl, setApiUrl] = useState("http://127.0.0.1:11434");
   const [model, setModel] = useState("nomic-embed-text");
   const [apiKey, setApiKey] = useState("");
@@ -74,7 +76,7 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
       // Show a helpful hint for common localhost issues
       const raw = String(e);
       const hint = raw.includes("Connection refused") || raw.includes("连接失败")
-        ? `${raw} — 请确认 Ollama 已启动（ollama serve）且模型已拉取（ollama pull ${model}）`
+        ? `${raw} ${t("embedSettings.ollamaHint", { model })}`
         : raw;
       setTestMsg(hint.slice(0, 200));
     } finally {
@@ -90,9 +92,9 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
       const newStats = await api.generateEmbeddings(apiUrl, model, apiKey);
       setStats(newStats);
       onStatsChange?.(newStats);
-      push(`向量索引完成：${newStats.indexed_messages} 条消息已索引`, "success");
+      push(t("embedSettings.generateSuccessToast", { n: newStats.indexed_messages }), "success");
     } catch (e: unknown) {
-      push(`索引失败：${e}`, "error");
+      push(t("embedSettings.generateFailToast", { error: String(e) }), "error");
     } finally {
       setGenerating(false);
       setProgress(null);
@@ -123,8 +125,8 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
               <BrainCircuit size={17} />
             </div>
             <div>
-              <h2 className="font-semibold text-stone-800">语义搜索配置</h2>
-              <p className="text-xs text-stone-400">使用 Embedding API 生成向量索引</p>
+              <h2 className="font-semibold text-stone-800">{t("embedSettings.title")}</h2>
+              <p className="text-xs text-stone-400">{t("embedSettings.subtitle")}</p>
             </div>
           </div>
           <button onClick={onClose} className="rounded-full p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-600">
@@ -135,11 +137,11 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
         <div className="px-6 py-5 space-y-5">
           {/* Presets */}
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-stone-400">快速配置</label>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-stone-400">{t("embedSettings.quickConfig")}</label>
             <div className="flex gap-2">
               {PRESETS.map((p) => (
                 <button
-                  key={p.label}
+                  key={p.url}
                   onClick={() => applyPreset(p)}
                   className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                     apiUrl === p.url
@@ -147,7 +149,7 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
                       : "border-stone-200 bg-stone-50 text-stone-600 hover:bg-stone-100"
                   }`}
                 >
-                  {p.label}
+                  {p.labelKey ? t(p.labelKey) : p.label}
                 </button>
               ))}
             </div>
@@ -156,7 +158,7 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
           {/* API URL */}
           <div>
             <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-stone-600">
-              <Plug size={12} /> API 地址
+              <Plug size={12} /> {t("embedSettings.apiUrl")}
             </label>
             <input
               value={apiUrl}
@@ -169,7 +171,7 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
           {/* Model */}
           <div>
             <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-stone-600">
-              <Cpu size={12} /> 模型
+              <Cpu size={12} /> {t("embedSettings.model")}
             </label>
             <input
               value={model}
@@ -182,7 +184,7 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
           {/* API Key */}
           <div>
             <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-stone-600">
-              <KeyRound size={12} /> API Key <span className="font-normal text-stone-400">（可选，Ollama 不需要）</span>
+              <KeyRound size={12} /> API Key <span className="font-normal text-stone-400">{t("embedSettings.apiKeyOptional")}</span>
             </label>
             <input
               type="password"
@@ -209,9 +211,9 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
           {stats && (
             <div className="rounded-xl bg-stone-50 p-4">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-semibold text-stone-500">索引状态</span>
+                <span className="text-xs font-semibold text-stone-500">{t("embedSettings.indexStatus")}</span>
                 <span className="text-xs text-stone-400">
-                  {indexed.toLocaleString()} / {total.toLocaleString()} 条消息
+                  {t("embedSettings.messagesOfTotal", { indexed: indexed.toLocaleString(), total: total.toLocaleString() })}
                   {stats.model && <span className="ml-1 text-violet-500">· {stats.model}</span>}
                 </span>
               </div>
@@ -221,7 +223,7 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
                   style={{ width: `${coverage}%` }}
                 />
               </div>
-              <p className="mt-1.5 text-right text-[11px] text-stone-400">{coverage}% 已索引</p>
+              <p className="mt-1.5 text-right text-[11px] text-stone-400">{t("embedSettings.percentIndexed", { pct: coverage })}</p>
             </div>
           )}
 
@@ -229,7 +231,7 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
           {generating && (
             <div className="space-y-1.5">
               <div className="flex justify-between text-xs text-stone-500">
-                <span>{pct !== null ? `已处理 ${progress!.current} / ${progress!.total}` : "准备中…"}</span>
+                <span>{pct !== null ? t("embedSettings.processedOf", { current: progress!.current, total: progress!.total }) : t("embedSettings.preparing")}</span>
                 {pct !== null && <span>{pct}%</span>}
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-stone-100">
@@ -258,7 +260,7 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
             ) : (
               <Plug size={14} />
             )}
-            测试连接
+            {t("embedSettings.testConnection")}
           </button>
           <button
             onClick={startGenerate}
@@ -271,10 +273,10 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
               <PlayCircle size={15} />
             )}
             {generating
-              ? "生成中…"
+              ? t("embedSettings.generating")
               : indexed >= total && total > 0
-              ? "✓ 索引已完整"
-              : `生成向量索引 (${(total - indexed).toLocaleString()} 条待处理)`}
+              ? t("embedSettings.indexAlreadyComplete")
+              : t("embedSettings.generateIndex", { n: (total - indexed).toLocaleString() })}
           </button>
         </div>
       </div>

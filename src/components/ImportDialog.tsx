@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { X, UploadCloud, CheckCircle2, FileArchive } from "lucide-react";
 import { api, type ImportSummary, type ImportProgress as Progress } from "../lib/api";
 import { useToast } from "../lib/toast";
+import { useI18n } from "../lib/i18n";
 
 interface Props {
   onClose: () => void;
@@ -18,6 +19,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
   );
   const [progress, setProgress] = useState<Progress | null>(null);
   const { push } = useToast();
+  const { t } = useI18n();
 
   const runImport = async (path: string) => {
     setBusy(true);
@@ -29,7 +31,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
       setSummary(result);
       onImported();
     } catch (e) {
-      push(`导入失败：${e}`, "error");
+      push(t("importDialog.importFailedToast", { error: String(e) }), "error");
     } finally {
       setBusy(false);
     }
@@ -43,8 +45,8 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
   const pickAndImport = async () => {
     const file = await open({
       multiple: false,
-      filters: [{ name: "导出压缩包", extensions: ["zip"] }],
-      title: "选择 Claude / ChatGPT 导出的 zip 文件",
+      filters: [{ name: t("importDialog.filePickerFilterName"), extensions: ["zip"] }],
+      title: t("importDialog.filePickerTitle"),
     });
     if (!file) return;
     await runImport(file as string);
@@ -72,7 +74,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
               <UploadCloud size={17} />
             </div>
             <div>
-              <h2 className="font-semibold text-stone-800">导入对话历史</h2>
+              <h2 className="font-semibold text-stone-800">{t("importDialog.title")}</h2>
               <p className="text-xs text-stone-400">Claude · ChatGPT · DeepSeek</p>
             </div>
           </div>
@@ -98,12 +100,12 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
                   <FileArchive size={24} />
                 </div>
                 <div className="text-center">
-                  <p className="font-medium text-stone-700 group-hover:text-orange-700">点击选择 ZIP 文件</p>
-                  <p className="mt-0.5 text-sm text-stone-400">或将文件拖入应用窗口</p>
+                  <p className="font-medium text-stone-700 group-hover:text-orange-700">{t("importDialog.clickToSelect")}</p>
+                  <p className="mt-0.5 text-sm text-stone-400">{t("importDialog.orDrag")}</p>
                 </div>
               </button>
               <p className="mt-3 text-center text-xs text-stone-400">
-                自动识别 Claude · ChatGPT · DeepSeek 格式 · 增量导入 · 跳过重复
+                {t("importDialog.autoDetectHint")}
               </p>
             </>
           )}
@@ -125,17 +127,15 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
                   <div className="h-2 w-2 animate-pulse rounded-full bg-orange-400" />
                   <span className="text-sm font-medium text-stone-700">
                     {!progress
-                      ? "准备中…"
+                      ? t("importDialog.preparing")
                       : progress.phase === "parse"
-                      ? "解析文件内容…"
-                      : "写入数据库"}
+                      ? t("importDialog.parsing")
+                      : t("importDialog.writingDb")}
                   </span>
                 </div>
                 {isDbPhase && progress!.total > 0 && (
                   <span className="tabular-nums text-sm text-stone-500">
-                    {progress!.current.toLocaleString()}
-                    <span className="text-stone-300"> / </span>
-                    {progress!.total.toLocaleString()} 条
+                    {t("importDialog.dbCount", { current: progress!.current.toLocaleString(), total: progress!.total.toLocaleString() })}
                   </span>
                 )}
               </div>
@@ -159,10 +159,10 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
                   <span>
                     {pct !== null
                       ? `${pct}%`
-                      : "请稍候，正在处理文件…"}
+                      : t("importDialog.pleaseWait")}
                   </span>
                   {pct !== null && (
-                    <span>{pct === 100 ? "即将完成" : "导入中"}</span>
+                    <span>{pct === 100 ? t("importDialog.almostDone") : t("importDialog.importing")}</span>
                   )}
                 </div>
               </div>
@@ -174,7 +174,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
             <div className="flex flex-col gap-4">
               <div className="flex flex-col items-center gap-2 py-2">
                 <CheckCircle2 size={36} className="text-emerald-500" />
-                <p className="font-semibold text-stone-800">导入完成</p>
+                <p className="font-semibold text-stone-800">{t("importDialog.importComplete")}</p>
                 {fileName && (
                   <p className="truncate text-xs font-mono text-stone-400 max-w-full px-4">{fileName}</p>
                 )}
@@ -190,21 +190,21 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
                     {platformLabel}
                   </span>
                   <span className="text-sm text-stone-500">
-                    文件中共 <strong>{summary.total_in_file.toLocaleString()}</strong> 条
+                    {t("importDialog.totalInFile", { n: summary.total_in_file.toLocaleString() })}
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-3 text-center">
                   <div className="rounded-xl bg-white p-3 ring-1 ring-stone-200">
                     <p className="text-xl font-bold text-emerald-600">{summary.added.toLocaleString()}</p>
-                    <p className="mt-0.5 text-xs text-stone-400">新增</p>
+                    <p className="mt-0.5 text-xs text-stone-400">{t("importDialog.added")}</p>
                   </div>
                   <div className="rounded-xl bg-white p-3 ring-1 ring-stone-200">
                     <p className="text-xl font-bold text-amber-500">{summary.updated.toLocaleString()}</p>
-                    <p className="mt-0.5 text-xs text-stone-400">更新</p>
+                    <p className="mt-0.5 text-xs text-stone-400">{t("importDialog.updated")}</p>
                   </div>
                   <div className="rounded-xl bg-white p-3 ring-1 ring-stone-200">
                     <p className="text-xl font-bold text-stone-400">{summary.skipped.toLocaleString()}</p>
-                    <p className="mt-0.5 text-xs text-stone-400">跳过</p>
+                    <p className="mt-0.5 text-xs text-stone-400">{t("importDialog.skipped")}</p>
                   </div>
                 </div>
               </div>
@@ -213,7 +213,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
                 onClick={onClose}
                 className="w-full rounded-xl bg-stone-900 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-800"
               >
-                完成
+                {t("importDialog.done")}
               </button>
             </div>
           )}

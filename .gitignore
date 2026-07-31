@@ -26,3 +26,9 @@ dist-ssr
 # Rust / Tauri build artifacts
 src-tauri/target/
 src-tauri/gen/schemas/
+
+# Apple certificates (install from Developer Portal, not source control)
+*.cer
+*.p12
+*.mobileprovision
+*.provisionprofile

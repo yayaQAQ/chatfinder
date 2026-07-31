@@ -14,6 +14,7 @@ import { JsonViewer } from "./pages/JsonViewer";
 import { ToastProvider, useToast } from "./lib/toast";
 import { api } from "./lib/api";
 import type { EmbeddingStats } from "./lib/api";
+import { useI18n } from "./lib/i18n";
 
 // ─── Drop overlay ────────────────────────────────────────────────────────────
 type DropTarget = "zip" | "json" | "unknown" | null;
@@ -27,6 +28,7 @@ function classifyPaths(paths: string[]): DropTarget {
 }
 
 function DropOverlay({ target }: { target: DropTarget }) {
+  const { t } = useI18n();
   if (!target) return null;
   const isZip = target === "zip";
   const isJson = target === "json";
@@ -47,10 +49,10 @@ function DropOverlay({ target }: { target: DropTarget }) {
         {isUnknown && <div className="text-4xl">📂</div>}
         <div className="text-center">
           <p className="text-xl font-semibold text-white">
-            {isZip ? "松手导入对话" : isJson ? "松手打开 JSON" : "不支持此文件格式"}
+            {isZip ? t("app.dropZipTitle") : isJson ? t("app.dropJsonTitle") : t("app.dropUnknownTitle")}
           </p>
           <p className="mt-1 text-sm opacity-70">
-            {isZip ? "自动识别 Claude / ChatGPT 格式" : isJson ? "在 JSON 查看器中打开" : "请拖入 .zip 或 .json 文件"}
+            {isZip ? t("app.dropZipSubtitle") : isJson ? t("app.dropJsonSubtitle") : t("app.dropUnknownSubtitle")}
           </p>
         </div>
       </div>
@@ -71,6 +73,7 @@ function InnerApp() {
   const [pendingJsonPath, setPendingJsonPath] = useState<string | null>(null);
   const navigate = useNavigate();
   const { push } = useToast();
+  const { t } = useI18n();
 
   // Load initial embedding stats so the brain icon shows without opening settings first
   useEffect(() => {
@@ -110,7 +113,7 @@ function InnerApp() {
         navigate("/json");
         setPendingJsonPath(path);
       } else {
-        push("仅支持 .zip 和 .json 文件", "error");
+        push(t("app.unsupportedFileToast"), "error");
       }
     });
 
@@ -121,7 +124,7 @@ function InnerApp() {
       unlistenDrop.then((fn) => fn());
       clearTimeout(dragLeaveTimer);
     };
-  }, [navigate, push]);
+  }, [navigate, push, t]);
 
   // Global keyboard shortcuts
   useEffect(() => {

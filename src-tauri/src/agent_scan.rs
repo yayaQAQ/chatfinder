@@ -10,18 +10,24 @@ use crate::models::{ImportSummary, NormalizedConversation, NormalizedMessage};
 use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-/// A discovered agent tool with a count of the sessions found on disk.
+/// A discovered agent tool with a count of the sessions found on disk. Always
+/// one entry per known tool (see `tool_defs`) — unlike a "found or omitted"
+/// list, this lets the UI offer a manual folder picker for a tool even when
+/// its default directory couldn't be read (missing, moved, or — on a sandboxed
+/// macOS build — blocked by the App Sandbox with no persisted grant).
 #[derive(Debug, Serialize, Clone)]
 pub struct AgentSource {
     pub tool: String,          // stable id, e.g. "claude-code" | "codex"
     pub label: String,         // human label, e.g. "Claude Code"
-    pub dir: String,           // absolute directory that was scanned
+    pub dir: String,           // absolute directory that was scanned (empty if unresolvable)
     pub session_count: usize,  // number of parseable session files
     pub message_count: usize,  // total user/assistant turns across sessions
+    pub accessible: bool,      // false if the directory couldn't be read at all
 }
 
 struct ToolDef {
@@ -37,6 +43,20 @@ fn claude_code_dir() -> Option<PathBuf> {
 
 fn codex_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".codex").join("sessions"))
+}
+
+/// `overrides` lets the caller (frontend, via a manual folder picker) point a
+/// tool at a directory other than its default — used when the default path
+/// doesn't exist, moved, or isn't readable (e.g. a sandboxed macOS build
+/// without a persisted grant for `~/.claude`). The override is session-only:
+/// nothing is written to disk here, the caller re-supplies it each call.
+fn resolve_dir(def: &ToolDef, overrides: &HashMap<String, String>) -> Option<PathBuf> {
+    if let Some(p) = overrides.get(def.tool) {
+        if !p.is_empty() {
+            return Some(PathBuf::from(p));
+        }
+    }
+    (def.dir)()
 }
 
 fn tool_defs() -> Vec<ToolDef> {
@@ -72,48 +92,56 @@ fn collect_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Scan all supported tool directories and report which ones hold sessions.
-/// Tools whose directory is missing or empty are omitted from the result.
-pub fn scan_agent_sources() -> Vec<AgentSource> {
+/// Scan every known tool's directory (default path, or the caller-supplied
+/// override) and report what each holds. Always returns one entry per known
+/// tool — including ones that are empty, missing, or unreadable — so the UI
+/// can offer a manual folder picker for exactly the tools that need it.
+pub fn scan_agent_sources(overrides: &HashMap<String, String>) -> Vec<AgentSource> {
     let mut sources = Vec::new();
     for def in tool_defs() {
-        let Some(dir) = (def.dir)() else { continue };
-        if !dir.exists() {
-            continue;
-        }
-        let mut files = Vec::new();
-        collect_jsonl_files(&dir, &mut files);
+        let dir = resolve_dir(&def, overrides);
+        let accessible = dir.as_deref().map(is_readable_dir).unwrap_or(false);
 
         let mut session_count = 0usize;
         let mut message_count = 0usize;
-        for path in &files {
-            if let Some(conv) = (def.parse)(path) {
-                if conv.messages.is_empty() {
-                    continue;
+        if accessible {
+            let mut files = Vec::new();
+            collect_jsonl_files(dir.as_deref().unwrap(), &mut files);
+            for path in &files {
+                if let Some(conv) = (def.parse)(path) {
+                    if conv.messages.is_empty() {
+                        continue;
+                    }
+                    session_count += 1;
+                    message_count += conv.messages.len();
                 }
-                session_count += 1;
-                message_count += conv.messages.len();
             }
         }
 
-        if session_count > 0 {
-            sources.push(AgentSource {
-                tool: def.tool.to_string(),
-                label: def.label.to_string(),
-                dir: dir.to_string_lossy().to_string(),
-                session_count,
-                message_count,
-            });
-        }
+        sources.push(AgentSource {
+            tool: def.tool.to_string(),
+            label: def.label.to_string(),
+            dir: dir.map(|d| d.to_string_lossy().to_string()).unwrap_or_default(),
+            session_count,
+            message_count,
+            accessible,
+        });
     }
     sources
 }
 
+fn is_readable_dir(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok()
+}
+
 /// Parse + persist sessions for the requested tools. `tools` is a list of
 /// `AgentSource.tool` ids; an empty list imports every supported tool.
+/// `overrides` mirrors `scan_agent_sources` — same session-only directory
+/// overrides picked via the manual folder picker.
 pub fn import_agent_sessions(
     conn: &mut Connection,
     tools: &[String],
+    overrides: &HashMap<String, String>,
     batch_id: &str,
     on_progress: Option<&dyn Fn(usize, usize)>,
 ) -> Result<ImportSummary, String> {
@@ -126,8 +154,8 @@ pub fn import_agent_sessions(
         if !want(def.tool) {
             continue;
         }
-        let Some(dir) = (def.dir)() else { continue };
-        if !dir.exists() {
+        let Some(dir) = resolve_dir(&def, overrides) else { continue };
+        if !is_readable_dir(&dir) {
             continue;
         }
         let mut files = Vec::new();
@@ -196,6 +224,20 @@ fn extract_plain_text(content: &Value) -> String {
                             .or_else(|| item.get("output_text"))
                             .and_then(Value::as_str)
                             .map(|s| s.to_string()),
+                        "image" => {
+                            let source = item.get("source")?;
+                            let src_type = source.get("type").and_then(Value::as_str)?;
+                            if src_type == "base64" {
+                                let media_type = source
+                                    .get("media_type")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("image/png");
+                                let data = source.get("data").and_then(Value::as_str)?;
+                                Some(format!("![](<data:{media_type};base64,{data}>)"))
+                            } else {
+                                None
+                            }
+                        }
                         _ => None,
                     }
                 })
