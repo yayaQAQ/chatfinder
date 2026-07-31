@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { writeText as clipboardWrite } from "@tauri-apps/plugin-clipboard-manager";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArrowLeft, ExternalLink, Star, MessageSquare, Copy, Check, PanelRightClose, PanelRight } from "lucide-react";
@@ -64,7 +65,7 @@ export function ConversationDetail() {
       // Sandbox blocks process spawning — fall back to clipboard so the user
       // can paste the command in their own terminal.
       try {
-        await navigator.clipboard.writeText(resumeCommand.cmd);
+        await clipboardWrite(resumeCommand.cmd);
         push(t("conversationDetail.resumeCopied"), "info");
       } catch {
         push(resumeCommand.cmd, "info");
