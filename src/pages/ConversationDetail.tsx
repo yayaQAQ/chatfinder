@@ -6,6 +6,7 @@ import { api, type ConversationSummary, type MessageRow } from "../lib/api";
 import { FavoriteModal } from "../components/FavoriteModal";
 import { MessageBubble } from "../components/MessageBubble";
 import { useI18n, formatLongDate } from "../lib/i18n";
+import { useToast } from "../lib/toast";
 
 function stripForPreview(text: string, imagePlaceholder: string): string {
   return text
@@ -23,6 +24,7 @@ function stripForPreview(text: string, imagePlaceholder: string): string {
 
 export function ConversationDetail() {
   const { t, lang } = useI18n();
+  const { push } = useToast();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -57,8 +59,16 @@ export function ConversationDetail() {
     setResuming(true);
     try {
       await api.launchResumeTerminal(resumeCommand.cmd, resumeCommand.cwd);
-    } catch (e) {
-      alert(t("conversationDetail.resumeError", { error: String(e) }));
+      push(t("conversationDetail.resumeOpened"), "success");
+    } catch {
+      // Sandbox blocks process spawning — fall back to clipboard so the user
+      // can paste the command in their own terminal.
+      try {
+        await navigator.clipboard.writeText(resumeCommand.cmd);
+        push(t("conversationDetail.resumeCopied"), "info");
+      } catch {
+        push(resumeCommand.cmd, "info");
+      }
     } finally {
       setResuming(false);
     }

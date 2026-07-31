@@ -92,7 +92,8 @@ export const en: typeof zh = {
     imagePlaceholder: "[image]",
     resumeConversation: "Resume in Terminal",
     resumeLaunching: "Opening terminal…",
-    resumeError: "Failed to open: {{error}}",
+    resumeOpened: "Session opened in terminal",
+    resumeCopied: "Command copied — paste it in your terminal to resume",
   },
   favorites: {
     linkedToMessage: "Linked to message",

@@ -90,7 +90,8 @@ export const zh = {
     imagePlaceholder: "[图片]",
     resumeConversation: "继续对话",
     resumeLaunching: "正在打开终端…",
-    resumeError: "打开失败：{{error}}",
+    resumeOpened: "已在终端中打开会话",
+    resumeCopied: "命令已复制到剪贴板，请在终端中粘贴运行",
   },
   favorites: {
     linkedToMessage: "定位到消息",
