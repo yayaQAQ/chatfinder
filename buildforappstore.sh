@@ -9,7 +9,7 @@ SIGN_PKG="3rd Party Mac Developer Installer: Tao Liu (8T9X7PLQ68)"
 
 echo "==> 构建 Universal Binary"
 cd /Users/a1-6/PycharmProjects/remake_history/app
-npm run tauri build -- --target universal-apple-darwin
+npm run tauri build -- --target universal-apple-darwin --bundles app
 
 echo "==> 清除隔离标记"
 xattr -d com.apple.quarantine "$PROFILE" 2>/dev/null || true

@@ -22,7 +22,7 @@ echo "==> 架构：$ARCH  目标：$TARGET"
 
 echo "==> 构建（原生架构，速度更快）"
 cd /Users/a1-6/PycharmProjects/remake_history/app
-npm run tauri build -- --target "$TARGET"
+npm run tauri build -- --target "$TARGET" --bundles app
 
 echo "==> 清除隔离标记"
 xattr -cr "$APP"

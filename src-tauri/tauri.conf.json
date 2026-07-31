@@ -25,7 +25,6 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
     "macOS": {
       "entitlements": "entitlements.plist",
       "signingIdentity": null,
