@@ -78,6 +78,7 @@ pub fn run() {
             commands::semantic_search,
             commands::scan_agent_sources,
             commands::import_agent_sessions,
+            commands::launch_resume_terminal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -7,6 +7,20 @@ import { FavoriteModal } from "../components/FavoriteModal";
 import { MessageBubble } from "../components/MessageBubble";
 import { useI18n, formatLongDate } from "../lib/i18n";
 
+function stripForPreview(text: string, imagePlaceholder: string): string {
+  return text
+    .replace(/!\[.*?\]\(<data:image\/[^>]*>\)/g, imagePlaceholder)
+    .replace(/!\[.*?\]\(data:image\/[^)]*\)/g, imagePlaceholder)
+    .replace(/!\[.*?\]\(.*?\)/g, imagePlaceholder)
+    .replace(/\[(.+?)\]\(.*?\)/g, "$1")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`(.+?)`/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/[*_~]/g, "")
+    .replace(/\n+/g, " ")
+    .trim();
+}
+
 export function ConversationDetail() {
   const { t, lang } = useI18n();
   const { id } = useParams<{ id: string }>();
@@ -21,6 +35,40 @@ export function ConversationDetail() {
   const [selection, setSelection] = useState<{ text: string; messageId: string | null } | null>(null);
   const [favoriteTarget, setFavoriteTarget] = useState<{ text: string; messageId: string | null } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [resuming, setResuming] = useState(false);
+  const humanMessages = messages.filter((m) => m.sender === "human");
+
+  const resumeCommand = (() => {
+    if (!conv) return null;
+    if (conv.platform === "claude-code") {
+      const sessionId = conv.id.startsWith("cc:") ? conv.id.slice(3) : conv.id;
+      return { cmd: `claude --resume ${sessionId}`, cwd: conv.summary || undefined };
+    }
+    if (conv.platform === "codex") {
+      const sessionId = conv.id.startsWith("codex:") ? conv.id.slice(6) : conv.id;
+      return { cmd: `codex resume ${sessionId}`, cwd: conv.summary || undefined };
+    }
+    return null;
+  })();
+
+  const handleResume = async () => {
+    if (!resumeCommand) return;
+    setResuming(true);
+    try {
+      await api.launchResumeTerminal(resumeCommand.cmd, resumeCommand.cwd);
+    } catch (e) {
+      alert(t("conversationDetail.resumeError", { error: String(e) }));
+    } finally {
+      setResuming(false);
+    }
+  };
+
+  const jumpToMessage = (msgId: string) => {
+    setHighlightedId(msgId);
+    const el = document.querySelector(`[data-message-id="${msgId}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => setHighlightedId(null), 2500);
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -137,7 +185,18 @@ export function ConversationDetail() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {conv.url && (
+          {resumeCommand && (
+            <button
+              onClick={handleResume}
+              disabled={resuming}
+              title={resumeCommand.cmd}
+              className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-600 transition-colors hover:bg-stone-50 hover:text-stone-800 disabled:opacity-50"
+            >
+              <ExternalLink size={13} />
+              {resuming ? t("conversationDetail.resumeLaunching") : t("conversationDetail.resumeConversation")}
+            </button>
+          )}
+          {conv.url && !resumeCommand && (
             <button
               onClick={() => openUrl(conv.url!)}
               className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-600 transition-colors hover:bg-stone-50 hover:text-stone-800"
@@ -149,26 +208,62 @@ export function ConversationDetail() {
         </div>
       </div>
 
-      {/* Messages */}
-      <div ref={containerRef} onMouseUp={handleMouseUp} className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-5 py-6">
-          {messages.length === 0 && (
-            <div className="flex flex-col items-center gap-3 py-16 text-stone-400">
-              <MessageSquare size={32} strokeWidth={1.5} />
-              <p className="text-sm">{t("conversationDetail.noMessages")}</p>
+      {/* Body: messages + right panel */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Messages */}
+        <div ref={containerRef} onMouseUp={handleMouseUp} className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-3xl px-5 py-6">
+            {messages.length === 0 && (
+              <div className="flex flex-col items-center gap-3 py-16 text-stone-400">
+                <MessageSquare size={32} strokeWidth={1.5} />
+                <p className="text-sm">{t("conversationDetail.noMessages")}</p>
+              </div>
+            )}
+            <div className="flex flex-col gap-5">
+              {messages.map((m) => (
+                <MessageBubble
+                  key={m.id}
+                  message={m}
+                  platform={conv.platform}
+                  highlighted={m.id === highlightedId}
+                />
+              ))}
             </div>
-          )}
-          <div className="flex flex-col gap-5">
-            {messages.map((m) => (
-              <MessageBubble
-                key={m.id}
-                message={m}
-                platform={conv.platform}
-                highlighted={m.id === highlightedId}
-              />
-            ))}
           </div>
         </div>
+
+        {/* Right panel: user inputs */}
+        {humanMessages.length > 0 && (
+          <div className="flex w-52 shrink-0 flex-col border-l border-stone-200 bg-white">
+            <div className="sticky top-0 border-b border-stone-100 bg-white px-3 py-2.5">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
+                {t("conversationDetail.userInputs")}
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto py-1">
+              {humanMessages.map((msg, idx) => {
+                const preview = stripForPreview(msg.text, t("conversationDetail.imagePlaceholder"));
+                const isActive = highlightedId === msg.id;
+                return (
+                  <button
+                    key={msg.id}
+                    onClick={() => jumpToMessage(msg.id)}
+                    className={`flex w-full items-start gap-2 px-3 py-2.5 text-left transition-colors hover:bg-stone-50 ${
+                      isActive ? "bg-amber-50" : ""
+                    }`}
+                  >
+                    <span className="mt-0.5 shrink-0 font-mono text-[10px] text-stone-300">
+                      #{idx + 1}
+                    </span>
+                    <p className="line-clamp-3 text-[11px] leading-relaxed text-stone-600">
+                      {preview || t("conversationDetail.imagePlaceholder")}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Selection toolbar */}

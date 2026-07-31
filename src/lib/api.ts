@@ -196,4 +196,6 @@ export const api = {
       maxMessages: filter.maxMessages ?? 0,
       role: filter.role ?? "",
     }),
+  launchResumeTerminal: (command: string, cwd?: string) =>
+    invoke<void>("launch_resume_terminal", { command, cwd }),
 };

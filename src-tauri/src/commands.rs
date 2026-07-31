@@ -816,6 +816,92 @@ pub async fn semantic_search(
     Ok(hits)
 }
 
+// ─── Resume CC / Codex session in terminal ───────────────────────────────────
+
+/// Open a terminal and run `command` (e.g. `claude --resume <id>`) inside it.
+/// Reads `preferred_terminal` from settings; defaults to macOS Terminal.app.
+/// Only macOS is supported; on other platforms this returns an error.
+#[tauri::command]
+pub fn launch_resume_terminal(
+    state: State<DbState>,
+    command: String,
+    cwd: Option<String>,
+) -> Result<(), String> {
+    if !cfg!(target_os = "macos") {
+        return Err("Terminal resume is only supported on macOS".to_string());
+    }
+    if command.trim().is_empty() {
+        return Err("Resume command is empty".to_string());
+    }
+
+    let preferred = {
+        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
+            "SELECT value FROM settings WHERE key = 'preferred_terminal'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+        .unwrap_or_else(|| "terminal".to_string())
+    };
+
+    let full_cmd = match &cwd {
+        Some(dir) if !dir.trim().is_empty() => {
+            let escaped = shell_escape_single(dir);
+            format!("cd {escaped} && {command}")
+        }
+        _ => command.clone(),
+    };
+
+    match preferred.as_str() {
+        "iterm2" | "iterm" => launch_iterm(&full_cmd),
+        _ => launch_macos_terminal(&full_cmd),
+    }
+}
+
+fn shell_escape_single(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+fn escape_osascript(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn launch_macos_terminal(command: &str) -> Result<(), String> {
+    let escaped = escape_osascript(command);
+    let script = format!(
+        r#"tell application "Terminal"
+    activate
+    do script "{escaped}"
+end tell"#
+    );
+    std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .status()
+        .map_err(|e| format!("Failed to launch Terminal: {e}"))?;
+    Ok(())
+}
+
+fn launch_iterm(command: &str) -> Result<(), String> {
+    let escaped = escape_osascript(command);
+    let script = format!(
+        r#"tell application "iTerm"
+    activate
+    create window with default profile
+    tell current session of current window
+        write text "{escaped}"
+    end tell
+end tell"#
+    );
+    std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .status()
+        .map_err(|e| format!("Failed to launch iTerm: {e}"))?;
+    Ok(())
+}
+
 // ─── Local agent-session scan / import ───────────────────────────────────────
 
 // Read-only: walk the known agent directories and report how many sessions

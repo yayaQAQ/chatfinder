@@ -84,6 +84,11 @@ export const zh = {
     noMessages: "此对话没有消息",
     textSelected: "已选中文本",
     saveSnippet: "收藏片段",
+    userInputs: "用户输入",
+    imagePlaceholder: "[图片]",
+    resumeConversation: "继续对话",
+    resumeLaunching: "正在打开终端…",
+    resumeError: "打开失败：{{error}}",
   },
   favorites: {
     linkedToMessage: "定位到消息",

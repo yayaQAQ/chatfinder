@@ -86,6 +86,11 @@ export const en: typeof zh = {
     noMessages: "This conversation has no messages",
     textSelected: "Text selected",
     saveSnippet: "Save snippet",
+    userInputs: "User Inputs",
+    imagePlaceholder: "[image]",
+    resumeConversation: "Resume in Terminal",
+    resumeLaunching: "Opening terminal…",
+    resumeError: "Failed to open: {{error}}",
   },
   favorites: {
     linkedToMessage: "Linked to message",
