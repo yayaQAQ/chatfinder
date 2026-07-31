@@ -87,6 +87,8 @@ export const en: typeof zh = {
     textSelected: "Text selected",
     saveSnippet: "Save snippet",
     userInputs: "User Inputs",
+    collapsePanel: "Collapse panel",
+    expandPanel: "Expand panel",
     imagePlaceholder: "[image]",
     resumeConversation: "Resume in Terminal",
     resumeLaunching: "Opening terminal…",

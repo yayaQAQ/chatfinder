@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ArrowLeft, ExternalLink, Star, MessageSquare, Copy, Check } from "lucide-react";
+import { ArrowLeft, ExternalLink, Star, MessageSquare, Copy, Check, PanelRightClose, PanelRight } from "lucide-react";
 import { api, type ConversationSummary, type MessageRow } from "../lib/api";
 import { FavoriteModal } from "../components/FavoriteModal";
 import { MessageBubble } from "../components/MessageBubble";
@@ -36,6 +36,7 @@ export function ConversationDetail() {
   const [favoriteTarget, setFavoriteTarget] = useState<{ text: string; messageId: string | null } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [resuming, setResuming] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const humanMessages = messages.filter((m) => m.sender === "human");
 
   const resumeCommand = (() => {
@@ -234,12 +235,25 @@ export function ConversationDetail() {
 
         {/* Right panel: user inputs */}
         {humanMessages.length > 0 && (
-          <div className="flex w-52 shrink-0 flex-col border-l border-stone-200 bg-white">
-            <div className="sticky top-0 border-b border-stone-100 bg-white px-3 py-2.5">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
-                {t("conversationDetail.userInputs")}
-              </p>
+          <div className={`flex shrink-0 flex-col border-l border-stone-200 bg-white transition-all duration-200 ${panelOpen ? "w-52" : "w-8"}`}>
+            {/* Panel header / toggle */}
+            <div className="flex items-center justify-between border-b border-stone-100 px-2 py-2.5">
+              {panelOpen && (
+                <p className="ml-1 text-[11px] font-semibold uppercase tracking-wide text-stone-400">
+                  {t("conversationDetail.userInputs")}
+                </p>
+              )}
+              <button
+                onClick={() => setPanelOpen((v) => !v)}
+                title={panelOpen ? t("conversationDetail.collapsePanel") : t("conversationDetail.expandPanel")}
+                className="flex h-5 w-5 items-center justify-center rounded text-stone-300 hover:bg-stone-100 hover:text-stone-500 transition-colors"
+              >
+                {panelOpen ? <PanelRightClose size={13} /> : <PanelRight size={13} />}
+              </button>
             </div>
+
+            {/* Message list — hidden when collapsed */}
+            {panelOpen && (
             <div className="flex-1 overflow-y-auto py-1">
               {humanMessages.map((msg, idx) => {
                 const preview = stripForPreview(msg.text, t("conversationDetail.imagePlaceholder"));
@@ -262,6 +276,7 @@ export function ConversationDetail() {
                 );
               })}
             </div>
+            )}
           </div>
         )}
       </div>

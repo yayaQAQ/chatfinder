@@ -85,6 +85,8 @@ export const zh = {
     textSelected: "已选中文本",
     saveSnippet: "收藏片段",
     userInputs: "用户输入",
+    collapsePanel: "收起面板",
+    expandPanel: "展开面板",
     imagePlaceholder: "[图片]",
     resumeConversation: "继续对话",
     resumeLaunching: "正在打开终端…",
