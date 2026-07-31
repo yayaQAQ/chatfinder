@@ -868,6 +868,13 @@ fn escape_osascript(s: &str) -> String {
 }
 
 fn launch_macos_terminal(command: &str) -> Result<(), String> {
+    // In App Sandbox (MAS / sandbox test builds) the kernel blocks child
+    // process spawning, so osascript can activate Terminal but "do script"
+    // is denied and the command never runs.  Detect the sandbox by the
+    // container env var and bail early so the JS clipboard fallback fires.
+    if std::env::var("APP_SANDBOX_CONTAINER_ID").is_ok() {
+        return Err("Terminal launch blocked in App Sandbox".to_string());
+    }
     let escaped = escape_osascript(command);
     let script = format!(
         r#"tell application "Terminal"
@@ -884,6 +891,9 @@ end tell"#
 }
 
 fn launch_iterm(command: &str) -> Result<(), String> {
+    if std::env::var("APP_SANDBOX_CONTAINER_ID").is_ok() {
+        return Err("Terminal launch blocked in App Sandbox".to_string());
+    }
     let escaped = escape_osascript(command);
     let script = format!(
         r#"tell application "iTerm"
