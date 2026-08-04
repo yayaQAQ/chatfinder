@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { X, Star } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
 import { useToast } from "../lib/toast";
 import { useI18n } from "../lib/i18n";
+import { markdownUrlTransform } from "../lib/markdown";
 
 export function FavoriteModal({
   conversationId,
@@ -58,8 +61,10 @@ export function FavoriteModal({
           </button>
         </div>
 
-        <div className="mb-3 max-h-32 overflow-y-auto rounded-lg bg-stone-50 p-3 text-sm text-stone-600">
-          {selectedText}
+        <div className="prose prose-sm prose-stone mb-3 max-h-32 max-w-none overflow-y-auto rounded-lg bg-stone-50 p-3 text-sm text-stone-600">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={markdownUrlTransform}>
+            {selectedText}
+          </ReactMarkdown>
         </div>
 
         <label className="mb-1 block text-xs font-medium text-stone-500">{t("favoriteModal.tagsLabel")}</label>

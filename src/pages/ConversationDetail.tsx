@@ -6,6 +6,7 @@ import { ArrowLeft, ExternalLink, Star, MessageSquare, Copy, Check, PanelRightCl
 import { api, type ConversationSummary, type MessageRow } from "../lib/api";
 import { FavoriteModal } from "../components/FavoriteModal";
 import { MessageBubble } from "../components/MessageBubble";
+import { selectionToMarkdown } from "../lib/markdown";
 import { useI18n, formatLongDate } from "../lib/i18n";
 import { useToast } from "../lib/toast";
 
@@ -110,8 +111,8 @@ export function ConversationDetail() {
 
   const handleMouseUp = () => {
     const sel = window.getSelection();
-    const text = sel?.toString().trim();
-    if (!text || !containerRef.current) return;
+    const plainText = sel?.toString().trim();
+    if (!plainText || !containerRef.current) return;
     if (!sel || sel.rangeCount === 0) return;
     const anchorNode = sel.anchorNode;
     if (!anchorNode || !containerRef.current.contains(anchorNode)) return;
@@ -125,6 +126,9 @@ export function ConversationDetail() {
       }
       node = node.parentNode;
     }
+    // Reconstruct markdown from the selected DOM range so bold/code/lists/
+    // links survive into the favorite instead of being flattened to plain text.
+    const text = selectionToMarkdown(sel.getRangeAt(0)) || plainText;
     setSelection({ text, messageId });
   };
 
