@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
+import type { PluggableList } from "unified";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Check, Copy, User, Bot, X, ZoomIn } from "lucide-react";
+import { Check, Copy, User, Bot, X, ZoomIn, Terminal } from "lucide-react";
 import type { MessageRow } from "../lib/api";
 import { markdownUrlTransform } from "../lib/markdown";
+import { rehypeHighlightQuery } from "../lib/highlightPlugin";
 import { useI18n, formatDateTime } from "../lib/i18n";
 
 function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
@@ -137,6 +139,12 @@ function getMarkdownComponents(onImageClick: (src: string) => void) {
     );
   },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mark({ children }: any) {
+    return (
+      <mark className="rounded bg-amber-200 px-0.5 not-italic text-stone-900">{children}</mark>
+    );
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   img({ src, alt }: any) {
     return (
       <span className="group/img relative my-3 inline-block">
@@ -161,14 +169,17 @@ function getMarkdownComponents(onImageClick: (src: string) => void) {
   };
 }
 
-export function MessageBubble({
+function MessageBubbleImpl({
   message,
   platform,
   highlighted = false,
+  highlightQuery,
 }: {
   message: MessageRow;
   platform: string;
   highlighted?: boolean;
+  /** In-conversation search term — occurrences get wrapped in <mark>. */
+  highlightQuery?: string;
 }) {
   const { t, lang } = useI18n();
   const isHuman = message.sender === "human";
@@ -178,6 +189,43 @@ export function MessageBubble({
   // active text selection (e.g. right after setSelection() in the parent).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const markdownComponents = useMemo(() => getMarkdownComponents(setLightboxSrc), []);
+  const rehypePlugins = useMemo(
+    // unified calls each entry as the attacher and uses its return value as
+    // the transformer — [plugin, options] makes it call rehypeHighlightQuery
+    // itself with `highlightQuery`, instead of us pre-calling it and handing
+    // unified the already-built transformer (which it would then invoke with
+    // no arguments, so `tree` inside it would be undefined).
+    (): PluggableList =>
+      highlightQuery ? [rehypeHighlight, [rehypeHighlightQuery, highlightQuery]] : [rehypeHighlight],
+    [highlightQuery],
+  );
+
+  // CLI-injected local content (slash-command output, hooks, caveats) rides
+  // on a "user" turn in the source log but wasn't typed by a person — shown
+  // as a compact system note instead of a real chat bubble so it reads as
+  // distinct from actual human input at a glance.
+  if (message.sender === "meta") {
+    return (
+      <div
+        data-message-id={message.id}
+        className={`flex justify-center transition-colors duration-700 ${highlighted ? "rounded-2xl bg-amber-50 py-1" : ""}`}
+      >
+        <div className="flex max-w-[85%] items-start gap-2 rounded-xl bg-stone-100/80 px-3 py-2 text-xs text-stone-500 ring-1 ring-stone-200">
+          <Terminal size={12} className="mt-0.5 shrink-0 text-stone-400" />
+          <div className="message-content min-w-0 flex-1 whitespace-pre-wrap break-words font-mono">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={rehypePlugins}
+              components={markdownComponents}
+              urlTransform={markdownUrlTransform}
+            >
+              {message.text || t("messageBubble.emptyMessage")}
+            </ReactMarkdown>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -188,11 +236,12 @@ export function MessageBubble({
         className={`mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-sm ${
           isHuman
             ? "bg-gradient-to-br from-stone-500 to-stone-700 text-white"
-            : platform === "claude"
+            : platform === "claude" || platform === "claude-code"
             ? "bg-gradient-to-br from-orange-400 to-rose-500 text-white"
             : platform === "deepseek"
             ? "bg-gradient-to-br from-blue-500 to-indigo-600 text-white"
-            : "bg-gradient-to-br from-emerald-400 to-teal-600 text-white"
+            // GPT-family (chatgpt, codex) — OpenAI's teal/cyan brand color
+            : "bg-gradient-to-br from-cyan-400 to-teal-600 text-white"
         }`}
       >
         {isHuman ? <User size={15} /> : <Bot size={15} />}
@@ -208,7 +257,7 @@ export function MessageBubble({
         <div className="message-content">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
+            rehypePlugins={rehypePlugins}
             components={markdownComponents}
             urlTransform={markdownUrlTransform}
           >
@@ -226,3 +275,8 @@ export function MessageBubble({
     </div>
   );
 }
+
+// Most messages in a long conversation don't match the current search term,
+// so memoize on props to skip re-rendering (and re-parsing markdown for)
+// the ones whose highlightQuery/highlighted state didn't actually change.
+export const MessageBubble = memo(MessageBubbleImpl);

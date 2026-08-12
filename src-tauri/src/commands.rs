@@ -3,7 +3,9 @@ use crate::db::DbState;
 use crate::embed;
 use crate::import;
 use crate::keywords;
-use crate::models::{ConversationSummary, EmbeddingStats, FavoriteRow, ImportSummary, MessageRow, SearchHit, TagRow};
+use crate::models::{
+    ConversationSummary, EmbeddingStats, FavoriteRow, ImportBatchRow, ImportSummary, MessageRow, SearchHit, TagRow,
+};
 use rusqlite::params;
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -203,6 +205,127 @@ pub fn get_conversation(
     }
 
     Ok((conv, messages))
+}
+
+/// Claude Code and Codex sessions store their working directory in
+/// `conversations.summary` (see agent_scan.rs) — this is the only field that
+/// currently carries it, ZIP-imported platforms always leave it empty. Used
+/// to group every session under a project directory regardless of which
+/// tool produced it.
+#[tauri::command]
+pub fn list_conversations_by_path(state: State<DbState>, path: String) -> Result<Vec<ConversationSummary>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count
+             FROM conversations
+             WHERE summary = ?1 AND summary != ''
+             ORDER BY COALESCE(updated_at, created_at) DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![path], |row| {
+            Ok(ConversationSummary {
+                id: row.get(0)?,
+                platform: row.get(1)?,
+                title: row.get(2)?,
+                summary: row.get(3)?,
+                url: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+                message_count: row.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+/// Removes everything belonging to `conversation_id` except the row itself,
+/// which the caller deletes afterward. `messages`, `favorites`, and
+/// `favorite_tags` all cascade via `ON DELETE CASCADE` FKs (see db.rs), but
+/// `search_index` (FTS5 has no FK support) and `embeddings` (no FK defined,
+/// keyed by message_id) don't — those need explicit cleanup, mirroring the
+/// same cleanup persist_conversations already does when a reimport changes a
+/// conversation's content.
+fn delete_conversation_dependents(tx: &rusqlite::Transaction, conversation_id: &str) -> Result<(), String> {
+    tx.execute(
+        "DELETE FROM embeddings WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?1)",
+        params![conversation_id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM search_index WHERE conversation_id = ?1", params![conversation_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_conversation(state: State<DbState>, id: String) -> Result<(), String> {
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    delete_conversation_dependents(&tx, &id)?;
+    tx.execute("DELETE FROM conversations WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_import_batches(state: State<DbState>) -> Result<Vec<ImportBatchRow>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT b.id, b.source_file, b.platform, b.imported_at, b.added_count, b.updated_count, b.skipped_count,
+                    (SELECT COUNT(*) FROM conversations c WHERE c.import_batch_id = b.id)
+             FROM import_batches b
+             ORDER BY b.imported_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(ImportBatchRow {
+                id: row.get(0)?,
+                source_file: row.get(1)?,
+                platform: row.get(2)?,
+                imported_at: row.get(3)?,
+                added_count: row.get(4)?,
+                updated_count: row.get(5)?,
+                skipped_count: row.get(6)?,
+                remaining_conversations: row.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+/// Deletes every conversation still tagged with this batch, then the batch
+/// row itself. Returns how many conversations were removed.
+#[tauri::command]
+pub fn delete_import_batch(state: State<DbState>, batch_id: String) -> Result<i64, String> {
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let ids: Vec<String> = {
+        let mut stmt = tx
+            .prepare("SELECT id FROM conversations WHERE import_batch_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![batch_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?
+    };
+
+    for conv_id in &ids {
+        delete_conversation_dependents(&tx, conv_id)?;
+    }
+    tx.execute(
+        "DELETE FROM conversations WHERE import_batch_id = ?1",
+        params![batch_id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM import_batches WHERE id = ?1", params![batch_id])
+        .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(ids.len() as i64)
 }
 
 // Deduped to one hit per conversation (best bm25 rank kept) so a single
@@ -961,4 +1084,148 @@ pub async fn import_agent_sessions(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod path_grouping_tests {
+    use super::*;
+
+    /// The point of list_conversations_by_path is grouping across tools —
+    /// a project directory worked on with both Claude Code and Codex should
+    /// show every session from either, sorted newest first, and nothing
+    /// from an unrelated directory or an empty-summary (non-agent) platform.
+    #[test]
+    fn groups_claude_code_and_codex_sessions_under_the_same_path_and_excludes_others() {
+        let db_path = std::env::temp_dir().join(format!("chatvault_test_path_group_{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&db_path);
+        let conn = crate::db::open(&db_path).unwrap();
+        conn.execute_batch(
+            "
+            INSERT INTO conversations (id, platform, title, summary, imported_at, updated_at)
+                VALUES ('cc:1', 'claude-code', 'CC session', '/Users/dev/reg-factory', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            INSERT INTO conversations (id, platform, title, summary, imported_at, updated_at)
+                VALUES ('codex:1', 'codex', 'Codex session', '/Users/dev/reg-factory', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+            INSERT INTO conversations (id, platform, title, summary, imported_at, updated_at)
+                VALUES ('cc:2', 'claude-code', 'Other project', '/Users/dev/other-project', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            INSERT INTO conversations (id, platform, title, imported_at)
+                VALUES ('claude:1', 'claude', 'ZIP-imported, no cwd', '2026-01-01T00:00:00Z');
+            ",
+        )
+        .unwrap();
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, platform, title, summary, url, created_at, updated_at, message_count
+                 FROM conversations WHERE summary = ?1 AND summary != ''
+                 ORDER BY COALESCE(updated_at, created_at) DESC",
+            )
+            .unwrap();
+        let ids: Vec<String> = stmt
+            .query_map(params!["/Users/dev/reg-factory"], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(
+            ids,
+            vec!["codex:1", "cc:1"],
+            "both tools' sessions for the path must come back, newest first, excluding the other project and the non-agent zip import"
+        );
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+}
+
+#[cfg(test)]
+mod delete_tests {
+    use super::*;
+
+    /// Seeds one conversation with a message, a favorite on that message, a
+    /// search_index row, and an embeddings row — one row in every table that
+    /// references a conversation/message, whether via FK cascade or not.
+    fn seed(conn: &rusqlite::Connection) {
+        conn.execute_batch(
+            "
+            INSERT INTO conversations (id, platform, title, imported_at, import_batch_id)
+                VALUES ('conv-1', 'claude-code', 'Test', '2026-01-01T00:00:00Z', 'batch-1');
+            INSERT INTO messages (id, conversation_id, sender, text, seq)
+                VALUES ('msg-1', 'conv-1', 'human', 'hello', 0);
+            INSERT INTO favorites (id, conversation_id, message_id, selected_text, created_at)
+                VALUES ('fav-1', 'conv-1', 'msg-1', 'hello', '2026-01-01T00:00:00Z');
+            INSERT INTO search_index (ref_id, conversation_id, kind, text)
+                VALUES ('msg-1', 'conv-1', 'message', 'hello');
+            INSERT INTO embeddings (message_id, model, vec) VALUES ('msg-1', 'test-model', x'00');
+            ",
+        )
+        .unwrap();
+    }
+
+    fn counts(conn: &rusqlite::Connection) -> (i64, i64, i64, i64, i64) {
+        let c = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        (
+            c("SELECT COUNT(*) FROM conversations"),
+            c("SELECT COUNT(*) FROM messages"),
+            c("SELECT COUNT(*) FROM favorites"),
+            c("SELECT COUNT(*) FROM search_index"),
+            c("SELECT COUNT(*) FROM embeddings"),
+        )
+    }
+
+    /// The risk this guards against: messages/favorites cascade via FK, but
+    /// search_index (FTS5, no FK support) and embeddings (no FK defined) do
+    /// not — a naive "just DELETE FROM conversations" would leave orphaned
+    /// rows in both, silently bloating the FTS index and leaking stale
+    /// embeddings for a message_id that no longer exists.
+    #[test]
+    fn delete_conversation_dependents_cleans_up_everything() {
+        let db_path = std::env::temp_dir().join(format!("chatvault_test_delete_conv_{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&db_path);
+        let mut conn = crate::db::open(&db_path).unwrap();
+        seed(&conn);
+        assert_eq!(counts(&conn), (1, 1, 1, 1, 1), "seed should populate every table once");
+
+        let tx = conn.transaction().unwrap();
+        delete_conversation_dependents(&tx, "conv-1").unwrap();
+        tx.execute("DELETE FROM conversations WHERE id = 'conv-1'", []).unwrap();
+        tx.commit().unwrap();
+
+        assert_eq!(
+            counts(&conn),
+            (0, 0, 0, 0, 0),
+            "conversation delete must clear messages/favorites (FK cascade) and search_index/embeddings (explicit)"
+        );
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn delete_conversation_dependents_only_affects_the_target_conversation() {
+        let db_path = std::env::temp_dir().join(format!("chatvault_test_delete_conv_scoped_{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&db_path);
+        let mut conn = crate::db::open(&db_path).unwrap();
+        seed(&conn);
+        conn.execute_batch(
+            "
+            INSERT INTO conversations (id, platform, title, imported_at, import_batch_id)
+                VALUES ('conv-2', 'claude-code', 'Other', '2026-01-01T00:00:00Z', 'batch-1');
+            INSERT INTO messages (id, conversation_id, sender, text, seq)
+                VALUES ('msg-2', 'conv-2', 'human', 'untouched', 0);
+            INSERT INTO search_index (ref_id, conversation_id, kind, text)
+                VALUES ('msg-2', 'conv-2', 'message', 'untouched');
+            ",
+        )
+        .unwrap();
+
+        let tx = conn.transaction().unwrap();
+        delete_conversation_dependents(&tx, "conv-1").unwrap();
+        tx.execute("DELETE FROM conversations WHERE id = 'conv-1'", []).unwrap();
+        tx.commit().unwrap();
+
+        let remaining_conv: i64 = conn.query_row("SELECT COUNT(*) FROM conversations WHERE id = 'conv-2'", [], |r| r.get(0)).unwrap();
+        let remaining_msg: i64 = conn.query_row("SELECT COUNT(*) FROM messages WHERE conversation_id = 'conv-2'", [], |r| r.get(0)).unwrap();
+        let remaining_fts: i64 = conn.query_row("SELECT COUNT(*) FROM search_index WHERE conversation_id = 'conv-2'", [], |r| r.get(0)).unwrap();
+        assert_eq!((remaining_conv, remaining_msg, remaining_fts), (1, 1, 1), "unrelated conversation must survive untouched");
+
+        let _ = std::fs::remove_file(&db_path);
+    }
 }

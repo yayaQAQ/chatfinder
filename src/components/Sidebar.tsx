@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { MessageSquareText, Star, UploadCloud, FileJson, Search, BrainCircuit, FolderSearch } from "lucide-react";
+import { MessageSquareText, Star, UploadCloud, FileJson, Search, BrainCircuit, FolderSearch, History } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -17,11 +17,12 @@ interface Props {
   onSearchClick: () => void;
   onSettingsClick: () => void;
   onAgentScanClick: () => void;
+  onImportHistoryClick: () => void;
   refreshKey: number;
   embedIndexed?: number;
 }
 
-export function Sidebar({ onImportClick, onSearchClick, onSettingsClick, onAgentScanClick, refreshKey, embedIndexed = 0 }: Props) {
+export function Sidebar({ onImportClick, onSearchClick, onSettingsClick, onAgentScanClick, onImportHistoryClick, refreshKey, embedIndexed = 0 }: Props) {
   const [count, setCount] = useState<number | null>(null);
   const { t, lang, setLang } = useI18n();
 
@@ -101,6 +102,10 @@ export function Sidebar({ onImportClick, onSearchClick, onSettingsClick, onAgent
               {embedIndexed >= 1000 ? `${(embedIndexed / 1000).toFixed(1)}k` : embedIndexed}
             </span>
           )}
+        </button>
+        <button onClick={onImportHistoryClick} title={t("sidebar.importHistory")} className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors text-stone-600 hover:bg-stone-100 hover:text-stone-900`}>
+          <History size={15} className="shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-left">{t("sidebar.importHistory")}</span>
         </button>
       </nav>
 

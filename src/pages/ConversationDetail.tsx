@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { writeText as clipboardWrite } from "@tauri-apps/plugin-clipboard-manager";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ArrowLeft, ExternalLink, Star, MessageSquare, Copy, Check, PanelRightClose, PanelRight } from "lucide-react";
+import {
+  ArrowLeft, ExternalLink, Star, MessageSquare, Copy, Check, PanelRightClose, PanelRight,
+  Search, ChevronUp, ChevronDown, X, Trash2, FolderOpen,
+} from "lucide-react";
 import { api, type ConversationSummary, type MessageRow } from "../lib/api";
 import { FavoriteModal } from "../components/FavoriteModal";
 import { MessageBubble } from "../components/MessageBubble";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PathConversationsDialog } from "../components/PathConversationsDialog";
 import { selectionToMarkdown } from "../lib/markdown";
 import { useI18n, formatLongDate } from "../lib/i18n";
 import { useToast } from "../lib/toast";
@@ -24,7 +29,7 @@ function stripForPreview(text: string, imagePlaceholder: string): string {
     .trim();
 }
 
-export function ConversationDetail() {
+export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => void } = {}) {
   const { t, lang } = useI18n();
   const { push } = useToast();
   const { id } = useParams<{ id: string }>();
@@ -35,6 +40,9 @@ export function ConversationDetail() {
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [loading, setLoading]   = useState(true);
   const [idCopied, setIdCopied] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [pathDialogOpen, setPathDialogOpen] = useState(false);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [selection, setSelection] = useState<{ text: string; messageId: string | null } | null>(null);
   const [favoriteTarget, setFavoriteTarget] = useState<{ text: string; messageId: string | null } | null>(null);
@@ -42,6 +50,57 @@ export function ConversationDetail() {
   const [resuming, setResuming] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   const humanMessages = messages.filter((m) => m.sender === "human");
+
+  // In-conversation search: client-side, scoped to the messages already
+  // loaded for this conversation — not the global keyword/semantic search.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchIndex, setSearchIndex] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const searchMatchIds = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return messages.filter((m) => m.text.toLowerCase().includes(q)).map((m) => m.id);
+  }, [messages, searchQuery]);
+  // Only messages that actually match get a highlightQuery prop, so
+  // MessageBubble's memo skips re-rendering (and re-highlighting) the rest
+  // of a long conversation on every keystroke.
+  const searchMatchIdSet = useMemo(() => new Set(searchMatchIds), [searchMatchIds]);
+
+  const gotoSearchMatch = (index: number) => {
+    if (searchMatchIds.length === 0) return;
+    const wrapped = ((index % searchMatchIds.length) + searchMatchIds.length) % searchMatchIds.length;
+    setSearchIndex(wrapped);
+    const msgId = searchMatchIds[wrapped];
+    setHighlightedId(msgId);
+    document.querySelector(`[data-message-id="${msgId}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  // Jump to the first match whenever the query (or its result set) changes.
+  useEffect(() => {
+    if (!searchOpen) return;
+    if (searchMatchIds.length > 0) {
+      setSearchIndex(0);
+      const msgId = searchMatchIds[0];
+      setHighlightedId(msgId);
+      document.querySelector(`[data-message-id="${msgId}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else {
+      setHighlightedId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchMatchIds, searchOpen]);
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchIndex(0);
+    setHighlightedId(null);
+  };
 
   const resumeCommand = (() => {
     if (!conv) return null;
@@ -73,6 +132,22 @@ export function ConversationDetail() {
       }
     } finally {
       setResuming(false);
+    }
+  };
+
+  const deleteConversation = async () => {
+    if (!id) return;
+    setDeleting(true);
+    try {
+      await api.deleteConversation(id);
+      push(t("common.deleteConversationToast"), "success");
+      onDataChanged?.();
+      navigate("/");
+    } catch (e) {
+      push(String(e), "error");
+    } finally {
+      setDeleting(false);
+      setDeleteConfirmOpen(false);
     }
   };
 
@@ -199,8 +274,27 @@ export function ConversationDetail() {
               {conv.id.slice(0, 8)}…
             </button>
           </div>
+          {conv.summary && (
+            <button
+              onClick={() => setPathDialogOpen(true)}
+              title={t("conversationDetail.viewPathConversations")}
+              className="mt-0.5 flex max-w-full items-center gap-1 rounded-md px-0.5 font-mono text-[11px] text-stone-400 transition-colors hover:text-orange-600"
+            >
+              <FolderOpen size={11} className="shrink-0" />
+              <span className="truncate">{conv.summary}</span>
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSearchOpen((v) => !v)}
+            title={t("conversationDetail.searchInConversation")}
+            className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors ${
+              searchOpen ? "bg-amber-100 text-amber-600" : "text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+            }`}
+          >
+            <Search size={15} />
+          </button>
           {resumeCommand && (
             <button
               onClick={handleResume}
@@ -221,8 +315,64 @@ export function ConversationDetail() {
               {t("conversationDetail.continueConversation")}
             </button>
           )}
+          <button
+            onClick={() => setDeleteConfirmOpen(true)}
+            title={t("conversationDetail.deleteConversation")}
+            className="flex h-8 w-8 items-center justify-center rounded-xl text-stone-400 transition-colors hover:bg-red-50 hover:text-red-600"
+          >
+            <Trash2 size={15} />
+          </button>
         </div>
       </div>
+
+      {/* In-conversation search bar */}
+      {searchOpen && (
+        <div className="flex items-center gap-2 border-b border-stone-200 bg-white px-5 py-2.5">
+          <Search size={14} className="shrink-0 text-stone-400" />
+          <input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                gotoSearchMatch(e.shiftKey ? searchIndex - 1 : searchIndex + 1);
+              } else if (e.key === "Escape") {
+                closeSearch();
+              }
+            }}
+            placeholder={t("conversationDetail.searchInConversationPlaceholder")}
+            className="h-8 flex-1 rounded-lg border border-stone-200 bg-stone-50 px-3 text-sm outline-none transition-colors focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
+          />
+          <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-stone-400">
+            {searchQuery.trim()
+              ? searchMatchIds.length > 0
+                ? t("conversationDetail.searchMatchCount", { i: searchIndex + 1, n: searchMatchIds.length })
+                : t("conversationDetail.searchNoMatches")
+              : ""}
+          </span>
+          <button
+            onClick={() => gotoSearchMatch(searchIndex - 1)}
+            disabled={searchMatchIds.length === 0}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:opacity-30 disabled:hover:bg-transparent"
+          >
+            <ChevronUp size={15} />
+          </button>
+          <button
+            onClick={() => gotoSearchMatch(searchIndex + 1)}
+            disabled={searchMatchIds.length === 0}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:opacity-30 disabled:hover:bg-transparent"
+          >
+            <ChevronDown size={15} />
+          </button>
+          <button
+            onClick={closeSearch}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
 
       {/* Body: messages + right panel */}
       <div className="flex flex-1 overflow-hidden">
@@ -242,6 +392,7 @@ export function ConversationDetail() {
                   message={m}
                   platform={conv.platform}
                   highlighted={m.id === highlightedId}
+                  highlightQuery={searchMatchIdSet.has(m.id) ? searchQuery.trim() : undefined}
                 />
               ))}
             </div>
@@ -326,6 +477,26 @@ export function ConversationDetail() {
             setFavoriteTarget(null);
             setSelection(null);
           }}
+        />
+      )}
+
+      {deleteConfirmOpen && (
+        <ConfirmDialog
+          title={t("common.deleteConversationConfirmTitle")}
+          message={t("common.deleteConversationConfirmMessage", { n: conv.message_count })}
+          confirmLabel={t("common.delete")}
+          cancelLabel={t("common.cancel")}
+          busy={deleting}
+          onConfirm={deleteConversation}
+          onCancel={() => setDeleteConfirmOpen(false)}
+        />
+      )}
+
+      {pathDialogOpen && conv.summary && (
+        <PathConversationsDialog
+          path={conv.summary}
+          currentId={conv.id}
+          onClose={() => setPathDialogOpen(false)}
         />
       )}
     </div>

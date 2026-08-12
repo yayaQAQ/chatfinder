@@ -5,6 +5,7 @@ import { FileArchive, FileJson } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { ImportDialog } from "./components/ImportDialog";
 import { AgentScanDialog } from "./components/AgentScanDialog";
+import { ImportHistoryDialog } from "./components/ImportHistoryDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { EmbedSettings } from "./components/EmbedSettings";
 import { Conversations } from "./pages/Conversations";
@@ -68,6 +69,7 @@ function InnerApp() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agentScanOpen, setAgentScanOpen] = useState(false);
+  const [importHistoryOpen, setImportHistoryOpen] = useState(false);
   const [embedStats, setEmbedStats] = useState<EmbeddingStats | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget>(null);
   const [pendingJsonPath, setPendingJsonPath] = useState<string | null>(null);
@@ -157,13 +159,14 @@ function InnerApp() {
         onSearchClick={() => setPaletteOpen(true)}
         onSettingsClick={() => setSettingsOpen(true)}
         onAgentScanClick={() => setAgentScanOpen(true)}
+        onImportHistoryClick={() => setImportHistoryOpen(true)}
         refreshKey={refreshKey}
         embedIndexed={embedStats?.indexed_messages ?? 0}
       />
       <main className="flex-1 overflow-hidden">
         <Routes>
-          <Route path="/" element={<Conversations refreshKey={refreshKey} embedIndexed={embedStats?.indexed_messages ?? 0} />} />
-          <Route path="/conversation/:id" element={<ConversationDetail />} />
+          <Route path="/" element={<Conversations refreshKey={refreshKey} embedIndexed={embedStats?.indexed_messages ?? 0} onDataChanged={handleImported} />} />
+          <Route path="/conversation/:id" element={<ConversationDetail onDataChanged={handleImported} />} />
           <Route path="/favorites" element={<Favorites />} />
           <Route
             path="/json"
@@ -189,6 +192,13 @@ function InnerApp() {
         <AgentScanDialog
           onClose={() => setAgentScanOpen(false)}
           onImported={handleImported}
+        />
+      )}
+
+      {importHistoryOpen && (
+        <ImportHistoryDialog
+          onClose={() => setImportHistoryOpen(false)}
+          onDeleted={handleImported}
         />
       )}
 

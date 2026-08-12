@@ -277,6 +277,18 @@ fn build_title(cwd: Option<&str>, first_user: Option<&str>) -> String {
     }
 }
 
+/// Claude Code and Codex both write CLI-injected content (local slash-command
+/// output, hook results, `<environment_context>` wrappers, …) into the
+/// session log as ordinary `role: "user"` turns — that's just the mechanism
+/// they use to feed local context back to the model, not something the human
+/// actually typed. Both wrap it in bare `<tag>...</tag>` markup, which real
+/// prose essentially never starts a message with, so that's the signal used
+/// to tell it apart from an actual human turn.
+fn is_synthetic_local_wrapper(text: &str) -> bool {
+    let t = text.trim();
+    t.starts_with('<') && t.contains("</")
+}
+
 // ─── Claude Code (~/.claude/projects/**/<session>.jsonl) ─────────────────────
 
 fn parse_claude_code_session(path: &Path) -> Option<NormalizedConversation> {
@@ -331,7 +343,17 @@ fn parse_claude_code_session(path: &Path) -> Option<NormalizedConversation> {
         if ts.is_some() {
             updated_at = ts.clone();
         }
-        let sender = if ty == "user" { "human" } else { "assistant" };
+        // "meta" = CLI-injected local content riding on a user-role turn —
+        // shown in the transcript but kept out of the human-input count/nav
+        // (ConversationDetail's right panel, title generation) and search
+        // role scoping, since it isn't something the person actually typed.
+        let sender = if ty != "user" {
+            "assistant"
+        } else if is_synthetic_local_wrapper(&text) {
+            "meta"
+        } else {
+            "human"
+        };
         let msg_id = value
             .get("uuid")
             .and_then(Value::as_str)
@@ -476,4 +498,72 @@ fn parse_codex_session(path: &Path) -> Option<NormalizedConversation> {
         updated_at,
         messages,
     })
+}
+
+#[cfg(test)]
+mod meta_sender_tests {
+    use super::*;
+    use std::io::Write;
+
+    /// Reproduces the real-world case reported against a `reg-factory` Claude
+    /// Code session: CLI-injected local-command output/caveats/`/model`
+    /// echoes ride on `role: "user"` turns in the JSONL. They must be tagged
+    /// "meta" — not "human" — so they don't pollute ConversationDetail's
+    /// right-panel "user inputs" nav or get picked as the conversation title.
+    #[test]
+    fn claude_code_synthetic_user_turns_are_tagged_meta_not_human() {
+        let dir = std::env::temp_dir().join(format!("cc_meta_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+        let mut f = File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"user","cwd":"/tmp/reg-factory","timestamp":"2026-01-01T00:00:00Z","uuid":"u1","message":{{"content":"python check_port_countries.py --host 192.168.77.11"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"assistant","timestamp":"2026-01-01T00:00:01Z","uuid":"a1","message":{{"content":"Let me check that."}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"user","timestamp":"2026-01-01T00:00:02Z","uuid":"u2","message":{{"content":"<local-command-stdout>Set model to Sonnet 5</local-command-stdout>"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"user","timestamp":"2026-01-01T00:00:03Z","uuid":"u3","message":{{"content":"<command-name>/model</command-name> <command-message>model</command-message> <command-args></command-args>"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"user","timestamp":"2026-01-01T00:00:04Z","uuid":"u4","message":{{"content":"这个probe_failed什么意思？"}}}}"#
+        )
+        .unwrap();
+        drop(f);
+
+        let conv = parse_claude_code_session(&path).expect("should parse");
+        let senders: Vec<&str> = conv.messages.iter().map(|m| m.sender.as_str()).collect();
+        assert_eq!(
+            senders,
+            vec!["human", "assistant", "meta", "meta", "human"],
+            "CLI-injected wrapper turns must be tagged meta, real prose stays human"
+        );
+
+        // Title generation must skip the meta turns and pick the real first
+        // human message, not the local-command-stdout content.
+        assert!(
+            conv.title.contains("python check_port_countries.py") || conv.title.contains("reg-factory"),
+            "title should be built from the real human turn, got: {}",
+            conv.title
+        );
+        assert!(
+            !conv.title.contains("local-command-stdout") && !conv.title.contains("Set model"),
+            "title must not be built from synthetic CLI content, got: {}",
+            conv.title
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -663,3 +663,111 @@ pub fn import_zip(
         total_in_file: total,
     })
 }
+
+#[cfg(test)]
+mod parser_version_tests {
+    use super::*;
+
+    fn conv(text: &str) -> NormalizedConversation {
+        NormalizedConversation {
+            id: "conv-1".to_string(),
+            platform: "claude-code".to_string(),
+            title: "Session".to_string(),
+            summary: String::new(),
+            url: String::new(),
+            created_at: Some("2026-01-01T00:00:00Z".to_string()),
+            updated_at: Some("2026-01-01T00:00:00Z".to_string()),
+            messages: vec![NormalizedMessage {
+                id: "msg-1".to_string(),
+                sender: "assistant".to_string(),
+                text: text.to_string(),
+                created_at: Some("2026-01-01T00:00:00Z".to_string()),
+            }],
+        }
+    }
+
+    /// Reproduces the real 4b180c9 scenario: a Claude Code session containing
+    /// an image block. The "old parser" drops the block entirely (matching
+    /// `extract_plain_text`'s pre-fix behavior); the "new parser" emits
+    /// markdown image syntax for the exact same source file. Re-persisting
+    /// with the new parser's output — same conversation id, same message id —
+    /// must overwrite the stored text, not skip it as a duplicate.
+    #[test]
+    fn reimport_with_changed_parser_output_updates_stored_text_and_search_index() {
+        let db_path = std::env::temp_dir().join("chatvault_test_parser_version_a.db");
+        let _ = std::fs::remove_file(&db_path);
+        let mut db_conn = crate::db::open(&db_path).unwrap();
+
+        let old_parser_text = "Here is the screenshot."; // image block silently dropped
+        let new_parser_text = "Here is the screenshot.\n\n![](<data:image/png;base64,AAAA>)";
+
+        // First import: old parser.
+        let tx = db_conn.transaction().unwrap();
+        let (added1, updated1, skipped1) =
+            persist_conversations(&tx, &[conv(old_parser_text)], "batch-1", "2026-01-01T00:00:00Z", None)
+                .unwrap();
+        tx.commit().unwrap();
+        assert_eq!((added1, updated1, skipped1), (1, 0, 0));
+
+        let stored: String = db_conn
+            .query_row("SELECT text FROM messages WHERE id = 'msg-1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stored, old_parser_text, "first import should store the old parser's output verbatim");
+
+        // Second import: same conversation id, same file on disk, but the
+        // parser was upgraded to extract images — simulates the user
+        // re-importing the same zip after a code update.
+        let tx = db_conn.transaction().unwrap();
+        let (added2, updated2, skipped2) =
+            persist_conversations(&tx, &[conv(new_parser_text)], "batch-2", "2026-01-02T00:00:00Z", None)
+                .unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            (added2, updated2, skipped2),
+            (0, 1, 0),
+            "changed parser output must be treated as an update, not a duplicate skip"
+        );
+
+        let stored_after: String = db_conn
+            .query_row("SELECT text FROM messages WHERE id = 'msg-1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            stored_after, new_parser_text,
+            "reimport must overwrite the message text with the new parser's output, image markdown included"
+        );
+
+        // The FTS index is rebuilt too, so search reflects the refreshed content.
+        let fts_hit: i64 = db_conn
+            .query_row(
+                "SELECT COUNT(*) FROM search_index WHERE ref_id = 'msg-1' AND text MATCH 'screenshot'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_hit, 1, "search index should be refreshed to match the updated text");
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// Sanity check: re-persisting identical output (parser unchanged) is a
+    /// no-op skip, so an ordinary reimport doesn't churn the database.
+    #[test]
+    fn reimport_with_unchanged_parser_output_is_skipped() {
+        let db_path = std::env::temp_dir().join("chatvault_test_parser_version_b.db");
+        let _ = std::fs::remove_file(&db_path);
+        let mut db_conn = crate::db::open(&db_path).unwrap();
+
+        let text = "Nothing changed here.";
+        let tx = db_conn.transaction().unwrap();
+        persist_conversations(&tx, &[conv(text)], "batch-1", "2026-01-01T00:00:00Z", None).unwrap();
+        tx.commit().unwrap();
+
+        let tx = db_conn.transaction().unwrap();
+        let (added, updated, skipped) =
+            persist_conversations(&tx, &[conv(text)], "batch-2", "2026-01-02T00:00:00Z", None).unwrap();
+        tx.commit().unwrap();
+        assert_eq!((added, updated, skipped), (0, 0, 1));
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+}

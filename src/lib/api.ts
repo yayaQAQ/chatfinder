@@ -51,6 +51,17 @@ export interface ImportProgress {
   phase: string; // "parse" | "db"
 }
 
+export interface ImportBatchRow {
+  id: string;
+  source_file: string;
+  platform: string;
+  imported_at: string;
+  added_count: number;
+  updated_count: number;
+  skipped_count: number;
+  remaining_conversations: number;
+}
+
 export interface SearchHit {
   conversation_id: string;
   conversation_title: string;
@@ -135,6 +146,11 @@ export const api = {
   countConversations: () => invoke<number>("count_conversations"),
   getConversation: (id: string) =>
     invoke<[ConversationSummary, MessageRow[]]>("get_conversation", { id }),
+  listConversationsByPath: (path: string) =>
+    invoke<ConversationSummary[]>("list_conversations_by_path", { path }),
+  deleteConversation: (id: string) => invoke<void>("delete_conversation", { id }),
+  listImportBatches: () => invoke<ImportBatchRow[]>("list_import_batches"),
+  deleteImportBatch: (batchId: string) => invoke<number>("delete_import_batch", { batchId }),
   searchAll: (query: string, filter: StructuralFilter = {}) =>
     invoke<SearchHit[]>("search_all", {
       query,

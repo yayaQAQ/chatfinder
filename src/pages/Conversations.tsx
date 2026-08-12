@@ -3,11 +3,13 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   Search, MessageSquare, Inbox, Loader2, X,
   SlidersHorizontal, ArrowUpDown, Calendar, Hash, BrainCircuit,
-  History, FileText, Heading, Star, UserRound, Bot,
+  History, FileText, Heading, Star, UserRound, Bot, Trash2,
 } from "lucide-react";
 import { api, type ConversationSummary, type ConversationFilter, type SortOption, type RoleFilter, type SearchHit, type FavoriteRow, type EmbedConfig } from "../lib/api";
 import { QuerySnippet, FtsSnippet } from "../lib/highlight";
 import { getRecentSearches, addRecentSearch, removeRecentSearch } from "../lib/searchHistory";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useToast } from "../lib/toast";
 import { useI18n, formatRelativeDate, type TranslationKey } from "../lib/i18n";
 
 const PAGE_SIZE = 60;
@@ -33,8 +35,19 @@ interface ActiveFilter {
   clear: () => void;
 }
 
-export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: number; embedIndexed?: number }) {
+export function Conversations({
+  refreshKey,
+  embedIndexed = 0,
+  onDataChanged,
+}: {
+  refreshKey: number;
+  embedIndexed?: number;
+  onDataChanged?: () => void;
+}) {
   const { t, lang } = useI18n();
+  const { push } = useToast();
+  const [pendingDelete, setPendingDelete] = useState<ConversationSummary | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Filter state in URL — restores on back-navigation (component remounts from URL)
@@ -206,6 +219,22 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
       ["platform", "from", "to", "min", "max", "role", "sort"].forEach((k) => next.delete(k));
       return next;
     }, { replace: true });
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      await api.deleteConversation(pendingDelete.id);
+      push(t("common.deleteConversationToast"), "success");
+      setItems((prev) => prev.filter((c) => c.id !== pendingDelete.id));
+      setPendingDelete(null);
+      onDataChanged?.();
+    } catch (e) {
+      push(String(e), "error");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -602,6 +631,13 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
                         {platformLabel[c.platform] ?? c.platform}
                       </span>
                       <span className="ml-auto text-xs text-stone-400">{formatRelativeDate(c.updated_at ?? c.created_at, lang, t)}</span>
+                      <button
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPendingDelete(c); }}
+                        title={t("conversations.deleteConversation")}
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-stone-300 opacity-0 transition-colors hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                      >
+                        <Trash2 size={12} />
+                      </button>
                     </div>
                     <h3 className="mb-1 line-clamp-2 text-sm font-semibold leading-snug text-stone-800 transition-colors group-hover:text-orange-700">
                       {c.title || t("common.untitledConversation")}
@@ -626,6 +662,18 @@ export function Conversations({ refreshKey, embedIndexed = 0 }: { refreshKey: nu
           )}
         </div>
       </div>
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title={t("common.deleteConversationConfirmTitle")}
+          message={t("common.deleteConversationConfirmMessage", { n: pendingDelete.message_count })}
+          confirmLabel={t("common.delete")}
+          cancelLabel={t("common.cancel")}
+          busy={deleting}
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }
