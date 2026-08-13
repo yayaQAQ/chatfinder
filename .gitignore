@@ -32,3 +32,8 @@ src-tauri/gen/schemas/
 *.p12
 *.mobileprovision
 *.provisionprofile
+
+# Personal build scripts / tests with hardcoded local paths and identity info
+buildforappstore.sh
+buildforsandboxtest.sh
+src-tauri/tests/import_real_export.rs
