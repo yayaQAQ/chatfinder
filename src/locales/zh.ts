@@ -108,6 +108,8 @@ export const zh = {
   pathDialog: {
     title: "同目录下的对话",
     loading: "加载中…",
+    searchPlaceholder: "搜索此目录下的对话内容…",
+    noSearchResults: "没有找到匹配的内容",
   },
   importHistory: {
     title: "导入记录",

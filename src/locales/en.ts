@@ -110,6 +110,8 @@ export const en: typeof zh = {
   pathDialog: {
     title: "Conversations in this directory",
     loading: "Loading…",
+    searchPlaceholder: "Search conversations in this directory…",
+    noSearchResults: "No matching results found",
   },
   importHistory: {
     title: "Import History",

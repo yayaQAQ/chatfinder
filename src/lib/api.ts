@@ -148,6 +148,8 @@ export const api = {
     invoke<[ConversationSummary, MessageRow[]]>("get_conversation", { id }),
   listConversationsByPath: (path: string) =>
     invoke<ConversationSummary[]>("list_conversations_by_path", { path }),
+  searchConversationsByPath: (path: string, query: string) =>
+    invoke<SearchHit[]>("search_conversations_by_path", { path, query }),
   deleteConversation: (id: string) => invoke<void>("delete_conversation", { id }),
   listImportBatches: () => invoke<ImportBatchRow[]>("list_import_batches"),
   deleteImportBatch: (batchId: string) => invoke<number>("delete_import_batch", { batchId }),

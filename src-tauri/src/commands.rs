@@ -240,6 +240,52 @@ pub fn list_conversations_by_path(state: State<DbState>, path: String) -> Result
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
+/// Full-text search scoped to every conversation sharing a working directory
+/// (`summary`), across whichever tool produced them — mirrors search_all's
+/// FTS query and one-hit-per-conversation dedup, just filtered by path
+/// instead of platform/date/message-count.
+#[tauri::command]
+pub fn search_conversations_by_path(
+    state: State<DbState>,
+    path: String,
+    query: String,
+) -> Result<Vec<SearchHit>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(vec![]);
+    }
+    let fts_query = format!("{}*", trimmed.replace('"', " "));
+    let mut stmt = conn
+        .prepare(
+            "SELECT si.ref_id, si.conversation_id, si.kind, snippet(search_index, 3, '【', '】', '…', 12),
+                    c.title, c.platform, c.updated_at, c.created_at
+             FROM search_index si
+             JOIN conversations c ON c.id = si.conversation_id
+             WHERE si.text MATCH ?1 AND c.summary = ?2 AND c.summary != ''
+             ORDER BY bm25(search_index) ASC LIMIT 400",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt.query(params![fts_query, path]).map_err(|e| e.to_string())?;
+    let mut hits = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let conversation_id: String = row.get(1).map_err(|e| e.to_string())?;
+        if !seen.insert(conversation_id.clone()) { continue; }
+        hits.push(SearchHit {
+            ref_id: row.get(0).map_err(|e| e.to_string())?,
+            conversation_id,
+            kind: row.get(2).map_err(|e| e.to_string())?,
+            snippet: row.get(3).map_err(|e| e.to_string())?,
+            conversation_title: row.get(4).map_err(|e| e.to_string())?,
+            platform: row.get(5).map_err(|e| e.to_string())?,
+            updated_at: row.get(6).map_err(|e| e.to_string())?,
+            created_at: row.get(7).map_err(|e| e.to_string())?,
+        });
+    }
+    Ok(hits)
+}
+
 /// Removes everything belonging to `conversation_id` except the row itself,
 /// which the caller deletes afterward. `messages`, `favorites`, and
 /// `favorite_tags` all cascade via `ON DELETE CASCADE` FKs (see db.rs), but
@@ -1131,6 +1177,77 @@ mod path_grouping_tests {
             vec!["codex:1", "cc:1"],
             "both tools' sessions for the path must come back, newest first, excluding the other project and the non-agent zip import"
         );
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+}
+
+#[cfg(test)]
+mod path_search_tests {
+    use super::*;
+
+    /// Same premise as list_conversations_by_path, but exercising the FTS
+    /// query: a term appearing in both a Claude Code and a Codex session
+    /// under one directory must return both (deduped to one hit each, best
+    /// rank kept), while a matching message in a *different* directory must
+    /// not leak in.
+    #[test]
+    fn finds_matches_across_tools_within_one_path_and_excludes_other_paths() {
+        let db_path = std::env::temp_dir().join(format!("chatvault_test_path_search_{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&db_path);
+        let conn = crate::db::open(&db_path).unwrap();
+        conn.execute_batch(
+            "
+            INSERT INTO conversations (id, platform, title, summary, imported_at, updated_at)
+                VALUES ('cc:1', 'claude-code', 'CC session', '/Users/dev/proj', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            INSERT INTO conversations (id, platform, title, summary, imported_at, updated_at)
+                VALUES ('codex:1', 'codex', 'Codex session', '/Users/dev/proj', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+            INSERT INTO conversations (id, platform, title, summary, imported_at, updated_at)
+                VALUES ('cc:2', 'claude-code', 'Other project', '/Users/dev/other', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+
+            INSERT INTO messages (id, conversation_id, sender, text, seq)
+                VALUES ('m1', 'cc:1', 'assistant', 'running the database migration now', 0);
+            INSERT INTO messages (id, conversation_id, sender, text, seq)
+                VALUES ('m2', 'codex:1', 'assistant', 'database migration finished', 0);
+            INSERT INTO messages (id, conversation_id, sender, text, seq)
+                VALUES ('m3', 'cc:2', 'assistant', 'database migration for the other project', 0);
+
+            INSERT INTO search_index (ref_id, conversation_id, kind, text)
+                VALUES ('m1', 'cc:1', 'message', 'running the database migration now');
+            INSERT INTO search_index (ref_id, conversation_id, kind, text)
+                VALUES ('m2', 'codex:1', 'message', 'database migration finished');
+            INSERT INTO search_index (ref_id, conversation_id, kind, text)
+                VALUES ('m3', 'cc:2', 'message', 'database migration for the other project');
+            ",
+        )
+        .unwrap();
+
+        let fts_query = "database*";
+        let path = "/Users/dev/proj";
+        let mut stmt = conn
+            .prepare(
+                "SELECT si.ref_id, si.conversation_id, si.kind, snippet(search_index, 3, '【', '】', '…', 12),
+                        c.title, c.platform, c.updated_at, c.created_at
+                 FROM search_index si
+                 JOIN conversations c ON c.id = si.conversation_id
+                 WHERE si.text MATCH ?1 AND c.summary = ?2 AND c.summary != ''
+                 ORDER BY bm25(search_index) ASC LIMIT 400",
+            )
+            .unwrap();
+        let mut rows = stmt.query(params![fts_query, path]).unwrap();
+        let mut conv_ids = Vec::new();
+        while let Some(row) = rows.next().unwrap() {
+            conv_ids.push(row.get::<_, String>(1).unwrap());
+        }
+
+        assert_eq!(
+            conv_ids.len(),
+            2,
+            "expected exactly one hit each from cc:1 and codex:1, got {conv_ids:?}"
+        );
+        assert!(conv_ids.contains(&"cc:1".to_string()));
+        assert!(conv_ids.contains(&"codex:1".to_string()));
+        assert!(!conv_ids.contains(&"cc:2".to_string()), "hit from a different directory must not appear");
 
         let _ = std::fs::remove_file(&db_path);
     }

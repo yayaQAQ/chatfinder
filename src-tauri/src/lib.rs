@@ -61,6 +61,7 @@ pub fn run() {
             commands::count_conversations,
             commands::get_conversation,
             commands::list_conversations_by_path,
+            commands::search_conversations_by_path,
             commands::delete_conversation,
             commands::list_import_batches,
             commands::delete_import_batch,
