@@ -5,6 +5,7 @@ mod embed;
 mod import;
 mod keywords;
 mod models;
+mod region;
 
 /// Thin re-exports used by integration tests to drive the import pipeline directly.
 pub mod test_support {
@@ -85,6 +86,7 @@ pub fn run() {
             commands::scan_agent_sources,
             commands::import_agent_sessions,
             commands::launch_resume_terminal,
+            commands::is_china_region,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

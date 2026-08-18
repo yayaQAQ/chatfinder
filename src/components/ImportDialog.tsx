@@ -4,6 +4,8 @@ import { X, UploadCloud, CheckCircle2, FileArchive } from "lucide-react";
 import { api, type ImportSummary, type ImportProgress as Progress } from "../lib/api";
 import { useToast } from "../lib/toast";
 import { useI18n } from "../lib/i18n";
+import { useRegion } from "../lib/region";
+import { platformLabel } from "../lib/platforms";
 
 interface Props {
   onClose: () => void;
@@ -20,6 +22,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const { push } = useToast();
   const { t } = useI18n();
+  const { isChina } = useRegion();
 
   const runImport = async (path: string) => {
     setBusy(true);
@@ -46,7 +49,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
     const file = await open({
       multiple: false,
       filters: [{ name: t("importDialog.filePickerFilterName"), extensions: ["zip"] }],
-      title: t("importDialog.filePickerTitle"),
+      title: t(isChina ? "importDialog.filePickerTitleChina" : "importDialog.filePickerTitle"),
     });
     if (!file) return;
     await runImport(file as string);
@@ -57,11 +60,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
     ? Math.round((progress!.current / progress!.total) * 100)
     : null;
 
-  const platformLabel =
-    summary?.platform === "claude"    ? "Claude"
-    : summary?.platform === "chatgpt"  ? "ChatGPT"
-    : summary?.platform === "deepseek" ? "DeepSeek"
-    : summary?.platform ?? "";
+  const platformLabelText = platformLabel(summary?.platform ?? "", isChina);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-sm">
@@ -75,7 +74,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
             </div>
             <div>
               <h2 className="font-semibold text-stone-800">{t("importDialog.title")}</h2>
-              <p className="text-xs text-stone-400">Claude · ChatGPT · DeepSeek</p>
+              <p className="text-xs text-stone-400">{isChina ? "Claude · DeepSeek" : "Claude · ChatGPT · DeepSeek"}</p>
             </div>
           </div>
           {!busy && (
@@ -105,7 +104,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
                 </div>
               </button>
               <p className="mt-3 text-center text-xs text-stone-400">
-                {t("importDialog.autoDetectHint")}
+                {t(isChina ? "importDialog.autoDetectHintChina" : "importDialog.autoDetectHint")}
               </p>
             </>
           )}
@@ -187,7 +186,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
                     : summary.platform === "deepseek" ? "bg-blue-100 text-blue-700"
                     : "bg-emerald-100 text-emerald-700"
                   }`}>
-                    {platformLabel}
+                    {platformLabelText}
                   </span>
                   <span className="text-sm text-stone-500">
                     {t("importDialog.totalInFile", { n: summary.total_in_file.toLocaleString() })}

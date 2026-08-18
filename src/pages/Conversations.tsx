@@ -11,6 +11,8 @@ import { getRecentSearches, addRecentSearch, removeRecentSearch } from "../lib/s
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../lib/toast";
 import { useI18n, formatRelativeDate, type TranslationKey } from "../lib/i18n";
+import { useRegion } from "../lib/region";
+import { platformLabel } from "../lib/platforms";
 
 const PAGE_SIZE = 60;
 
@@ -21,7 +23,6 @@ const platformBadge: Record<string, string> = {
   "claude-code": "bg-amber-100 text-amber-700 border-amber-200",
   codex:         "bg-sky-100 text-sky-700 border-sky-200",
 };
-const platformLabel: Record<string, string> = { claude: "Claude", chatgpt: "ChatGPT", deepseek: "DeepSeek", "claude-code": "Claude Code", codex: "Codex" };
 
 const SORT_OPTIONS: { value: SortOption; labelKey: TranslationKey }[] = [
   { value: "newest",          labelKey: "conversations.sortNewest" },
@@ -45,6 +46,7 @@ export function Conversations({
   onDataChanged?: () => void;
 }) {
   const { t, lang } = useI18n();
+  const { isChina } = useRegion();
   const { push } = useToast();
   const [pendingDelete, setPendingDelete] = useState<ConversationSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -202,7 +204,7 @@ export function Conversations({
 
   // Build human-readable active filter chips
   const activeFilters: ActiveFilter[] = [];
-  if (platform)   activeFilters.push({ label: platformLabel[platform] ?? platform, clear: () => setPlatform("") });
+  if (platform)   activeFilters.push({ label: platformLabel(platform, isChina), clear: () => setPlatform("") });
   if (dateFrom)   activeFilters.push({ label: t("conversations.fromPrefix", { date: dateFrom }), clear: () => setDateFrom("") });
   if (dateTo)     activeFilters.push({ label: t("conversations.toPrefix", { date: dateTo }), clear: () => setDateTo("") });
   if (minMsg)     activeFilters.push({ label: t("conversations.minMessagesChip", { n: minMsg }), clear: () => setMinMsg("") });
@@ -336,7 +338,9 @@ export function Conversations({
 
           {/* Quick platform pills — always visible so search + filter compose in one motion */}
           <div className="flex flex-wrap items-center gap-1.5">
-            {(["", "claude", "chatgpt", "deepseek", "claude-code", "codex"] as const).map((p) => (
+            {(["", "claude", "chatgpt", "deepseek", "claude-code", "codex"] as const)
+              .filter((p) => !(isChina && p === "chatgpt"))
+              .map((p) => (
               <button
                 key={p}
                 onClick={() => setPlatform(platform === p ? "" : p)}
@@ -346,7 +350,7 @@ export function Conversations({
                     : "border-stone-200 bg-white text-stone-600 hover:bg-stone-100"
                 }`}
               >
-                {p === "" ? t("conversations.allPlatforms") : platformLabel[p] ?? p}
+                {p === "" ? t("conversations.allPlatforms") : platformLabel(p, isChina)}
               </button>
             ))}
             {!hasQuery && (
@@ -529,7 +533,7 @@ export function Conversations({
                       >
                         <div className="mb-2 flex items-center gap-2">
                           <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${platformBadge[h.platform] ?? "bg-stone-100 text-stone-600 border-stone-200"}`}>
-                            {platformLabel[h.platform] ?? h.platform}
+                            {platformLabel(h.platform, isChina)}
                           </span>
                           {sim !== null ? (
                             <FileText size={11} className="text-violet-400" />
@@ -628,7 +632,7 @@ export function Conversations({
                   >
                     <div className="mb-2.5 flex items-center gap-2">
                       <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${platformBadge[c.platform] ?? "bg-stone-100 text-stone-600 border-stone-200"}`}>
-                        {platformLabel[c.platform] ?? c.platform}
+                        {platformLabel(c.platform, isChina)}
                       </span>
                       <span className="ml-auto text-xs text-stone-400">{formatRelativeDate(c.updated_at ?? c.created_at, lang, t)}</span>
                       <button

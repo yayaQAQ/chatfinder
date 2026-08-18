@@ -216,4 +216,5 @@ export const api = {
     }),
   launchResumeTerminal: (command: string, cwd?: string) =>
     invoke<void>("launch_resume_terminal", { command, cwd }),
+  isChinaRegion: () => invoke<boolean>("is_china_region"),
 };

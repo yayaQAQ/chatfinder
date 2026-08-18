@@ -16,6 +16,7 @@ import { ToastProvider, useToast } from "./lib/toast";
 import { api } from "./lib/api";
 import type { EmbeddingStats } from "./lib/api";
 import { useI18n } from "./lib/i18n";
+import { useRegion } from "./lib/region";
 
 // ─── Drop overlay ────────────────────────────────────────────────────────────
 type DropTarget = "zip" | "json" | "unknown" | null;
@@ -30,6 +31,7 @@ function classifyPaths(paths: string[]): DropTarget {
 
 function DropOverlay({ target }: { target: DropTarget }) {
   const { t } = useI18n();
+  const { isChina } = useRegion();
   if (!target) return null;
   const isZip = target === "zip";
   const isJson = target === "json";
@@ -53,7 +55,7 @@ function DropOverlay({ target }: { target: DropTarget }) {
             {isZip ? t("app.dropZipTitle") : isJson ? t("app.dropJsonTitle") : t("app.dropUnknownTitle")}
           </p>
           <p className="mt-1 text-sm opacity-70">
-            {isZip ? t("app.dropZipSubtitle") : isJson ? t("app.dropJsonSubtitle") : t("app.dropUnknownSubtitle")}
+            {isZip ? t(isChina ? "app.dropZipSubtitleChina" : "app.dropZipSubtitle") : isJson ? t("app.dropJsonSubtitle") : t("app.dropUnknownSubtitle")}
           </p>
         </div>
       </div>

@@ -14,6 +14,8 @@ import { PathConversationsDialog } from "../components/PathConversationsDialog";
 import { selectionToMarkdown } from "../lib/markdown";
 import { useI18n, formatLongDate } from "../lib/i18n";
 import { useToast } from "../lib/toast";
+import { useRegion } from "../lib/region";
+import { platformLabel } from "../lib/platforms";
 
 function stripForPreview(text: string, imagePlaceholder: string): string {
   return text
@@ -31,6 +33,7 @@ function stripForPreview(text: string, imagePlaceholder: string): string {
 
 export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => void } = {}) {
   const { t, lang } = useI18n();
+  const { isChina } = useRegion();
   const { push } = useToast();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -222,12 +225,7 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
     return <div className="flex h-full items-center justify-center text-sm text-stone-400">{t("conversationDetail.notFound")}</div>;
   }
 
-  const platformLabel =
-    conv.platform === "claude" ? "Claude"
-    : conv.platform === "deepseek" ? "DeepSeek"
-    : conv.platform === "claude-code" ? "Claude Code"
-    : conv.platform === "codex" ? "Codex"
-    : "ChatGPT";
+  const platformLabelText = platformLabel(conv.platform, isChina);
   const platformColor =
     conv.platform === "claude"
       ? "from-orange-400 to-rose-500"
@@ -252,13 +250,13 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
         <div
           className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${platformColor} text-white shadow-sm text-xs font-bold`}
         >
-          {platformLabel[0]}
+          {platformLabelText[0]}
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="truncate font-semibold text-stone-800">{conv.title || t("common.untitledConversation")}</h1>
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-xs text-stone-400">
-              {platformLabel} · {t("common.messageCount", { n: conv.message_count })}
+              {platformLabelText} · {t("common.messageCount", { n: conv.message_count })}
               {conv.updated_at ? ` · ${formatLongDate(conv.updated_at, lang)}` : ""}
             </p>
             <button

@@ -21,6 +21,7 @@ export const en: typeof zh = {
   app: {
     dropZipTitle: "Drop to import conversations",
     dropZipSubtitle: "Auto-detects Claude / ChatGPT format",
+    dropZipSubtitleChina: "Auto-detects Claude / DeepSeek format",
     dropJsonTitle: "Drop to open JSON",
     dropJsonSubtitle: "Open in the JSON viewer",
     dropUnknownTitle: "Unsupported file format",
@@ -187,6 +188,7 @@ export const en: typeof zh = {
     clickToSelect: "Click to select a ZIP file",
     orDrag: "or drag a file into the app window",
     autoDetectHint: "Auto-detects Claude · ChatGPT · DeepSeek format · Incremental import · Skips duplicates",
+    autoDetectHintChina: "Auto-detects Claude · DeepSeek format · Incremental import · Skips duplicates",
     preparing: "Preparing…",
     parsing: "Parsing file contents…",
     writingDb: "Writing to database",
@@ -200,6 +202,7 @@ export const en: typeof zh = {
     skipped: "Skipped",
     done: "Done",
     filePickerTitle: "Select a Claude / ChatGPT export zip file",
+    filePickerTitleChina: "Select a Claude / DeepSeek export zip file",
     filePickerFilterName: "Export archive",
     importFailedToast: "Import failed: {{error}}",
     dbCount: "{{current}} / {{total}}",
