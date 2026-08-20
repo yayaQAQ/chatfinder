@@ -4,6 +4,13 @@
 
 一款跨平台桌面应用（Tauri + React），用于导入、浏览和搜索你的 AI 聊天记录，支持 **Claude**、**ChatGPT**、**DeepSeek**，以及本地编程 Agent（**Claude Code**、**Codex CLI**）——所有数据都保存在本地的单一 SQLite 数据库中，不上传任何服务器。
 
+## 链接
+
+- **Mac App Store** → [下载 ChatFinder](https://apps.apple.com/app/chatfinder/id6796240541)
+- **官网** → [chatfinder.newapiratio.com](https://chatfinder.newapiratio.com/)
+- **支持与常见问题** → [chatfinder.newapiratio.com/support](https://chatfinder.newapiratio.com/support/)
+- **隐私政策** → [chatfinder.newapiratio.com/privacy](https://chatfinder.newapiratio.com/privacy/)
+
 ## 功能特性
 
 - **多来源导入** — 直接拖入官方导出的 ZIP 包，自动识别平台：
