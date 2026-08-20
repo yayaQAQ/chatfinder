@@ -338,9 +338,7 @@ export function Conversations({
 
           {/* Quick platform pills — always visible so search + filter compose in one motion */}
           <div className="flex flex-wrap items-center gap-1.5">
-            {(["", "claude", "chatgpt", "deepseek", "claude-code", "codex"] as const)
-              .filter((p) => !(isChina && p === "chatgpt"))
-              .map((p) => (
+            {(["", "claude", "chatgpt", "deepseek", "claude-code", "codex"] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => setPlatform(platform === p ? "" : p)}

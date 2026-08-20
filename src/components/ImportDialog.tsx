@@ -74,7 +74,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
             </div>
             <div>
               <h2 className="font-semibold text-stone-800">{t("importDialog.title")}</h2>
-              <p className="text-xs text-stone-400">{isChina ? "Claude · DeepSeek" : "Claude · ChatGPT · DeepSeek"}</p>
+              <p className="text-xs text-stone-400">{isChina ? "Claude · AI 对话 · DeepSeek" : "Claude · ChatGPT · DeepSeek"}</p>
             </div>
           </div>
           {!busy && (

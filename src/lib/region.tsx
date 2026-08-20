@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { api } from "./api";
 
 interface RegionContextValue {
-  /** True when the system region is mainland China (ChatGPT features hidden). */
+  /** True when the system region is mainland China (ChatGPT brand relabeled). */
   isChina: boolean;
 }
 

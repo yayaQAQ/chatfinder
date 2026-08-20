@@ -615,15 +615,6 @@ pub fn import_zip(
     let raw = read_conversations_json(zip_path)?;
     let arr = raw.as_array().ok_or_else(|| "conversations.json 格式不正确".to_string())?.clone();
     let platform = detect_platform(&arr);
-
-    // Guideline 5: ChatGPT functionality is deactivated on the mainland China
-    // storefront, so refuse to import ChatGPT exports when the system region is
-    // China. (DeepSeek is a domestic service and Claude is not flagged, so only
-    // the ChatGPT path is blocked.)
-    if platform == "chatgpt" && crate::region::is_china_region() {
-        return Err("ChatGPT 导入在当前地区不可用".to_string());
-    }
-
     let total = arr.len() as i64;
 
     let mut conversations = match platform {
