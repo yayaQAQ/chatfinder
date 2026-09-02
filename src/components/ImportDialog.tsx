@@ -53,8 +53,10 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
     await runImport(file as string);
   };
 
-  const isDbPhase = progress?.phase === "db";
-  const pct = isDbPhase && progress!.total > 0
+  // "compare" and "db" count conversations, so they drive a real bar; "parse"
+  // and "clean" are single indivisible steps and show an indeterminate one.
+  const isCountedPhase = progress?.phase === "db" || progress?.phase === "compare";
+  const pct = isCountedPhase && progress!.total > 0
     ? Math.round((progress!.current / progress!.total) * 100)
     : null;
 
@@ -127,10 +129,14 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
                       ? t("importDialog.preparing")
                       : progress.phase === "parse"
                       ? t("importDialog.parsing")
+                      : progress.phase === "compare"
+                      ? t("importDialog.comparing")
+                      : progress.phase === "clean"
+                      ? t("importDialog.cleaning")
                       : t("importDialog.writingDb")}
                   </span>
                 </div>
-                {isDbPhase && progress!.total > 0 && (
+                {isCountedPhase && progress!.total > 0 && (
                   <span className="tabular-nums text-sm text-stone-500">
                     {t("importDialog.dbCount", { current: progress!.current.toLocaleString(), total: progress!.total.toLocaleString() })}
                   </span>

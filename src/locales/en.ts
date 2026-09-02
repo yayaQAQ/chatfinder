@@ -216,6 +216,8 @@ export const en: typeof zh = {
     autoDetectHint: `Auto-detects Claude · ${CHATGPT} · DeepSeek format · Incremental import · Skips duplicates`,
     preparing: "Preparing…",
     parsing: "Parsing file contents…",
+    comparing: "Comparing with existing conversations…",
+    cleaning: "Clearing stale index rows…",
     writingDb: "Writing to database",
     pleaseWait: "Please wait, processing file…",
     almostDone: "Almost done",

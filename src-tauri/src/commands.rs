@@ -43,8 +43,8 @@ pub async fn import_zip_file(
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<DbState>();
         let mut conn = state.0.lock().map_err(|e| e.to_string())?;
-        import::import_zip(&mut conn, &zip_path, &batch_id, Some(&move |current, total| {
-            on_progress.send(ImportProgress { current, total, phase: "db".to_string() }).ok();
+        import::import_zip(&mut conn, &zip_path, &batch_id, Some(&move |phase: &str, current, total| {
+            on_progress.send(ImportProgress { current, total, phase: phase.to_string() }).ok();
         }))
     })
     .await
@@ -1210,9 +1210,9 @@ pub async fn import_agent_sessions(
             &tools,
             &overrides,
             &batch_id,
-            Some(&move |current, total| {
+            Some(&move |phase: &str, current, total| {
                 on_progress
-                    .send(ImportProgress { current, total, phase: "db".to_string() })
+                    .send(ImportProgress { current, total, phase: phase.to_string() })
                     .ok();
             }),
         )

@@ -217,6 +217,8 @@ export const zh = {
     autoDetectHint: `自动识别 Claude · ${CHATGPT} · DeepSeek 格式 · 增量导入 · 跳过重复`,
     preparing: "准备中…",
     parsing: "解析文件内容…",
+    comparing: "比对已有对话…",
+    cleaning: "清理旧索引…",
     writingDb: "写入数据库",
     pleaseWait: "请稍候，正在处理文件…",
     almostDone: "即将完成",

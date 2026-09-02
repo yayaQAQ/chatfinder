@@ -474,13 +474,20 @@ fn parse_deepseek(arr: Vec<Value>) -> Vec<NormalizedConversation> {
                         if !text.trim().is_empty() {
                             let mid = node.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                             let ts = message.get("inserted_at").and_then(|v| v.as_str()).map(String::from);
+                            // DeepSeek tags every node with the model, request
+                            // turns included — only the answer was produced by it.
+                            let model = if sender == "assistant" {
+                                message.get("model").and_then(|v| v.as_str()).map(String::from)
+                            } else {
+                                None
+                            };
                             messages.push(NormalizedMessage {
                                 id: format!("{id}_{mid}"),
                                 sender: sender.to_string(),
                                 text,
                                 created_at: ts,
                                 kind: "text".to_string(),
-                                model: None,
+                                model,
                             });
                         }
                     }
@@ -544,12 +551,16 @@ fn distinct_models(conv: &NormalizedConversation) -> Vec<&str> {
 /// Persist a batch of normalized conversations into an open transaction,
 /// returning (added, updated, skipped). Shared by the ZIP importer and the
 /// local-agent-session importer so both apply identical dedup / FTS logic.
+/// Progress reporter: `(phase, current, total)`. A `total` of 0 means the phase
+/// has no countable unit of work — the UI shows an indeterminate state for it.
+pub(crate) type ProgressFn<'a> = &'a dyn Fn(&str, usize, usize);
+
 pub(crate) fn persist_conversations(
     tx: &rusqlite::Transaction,
     conversations: &[NormalizedConversation],
     batch_id: &str,
     now: &str,
-    on_progress: Option<&dyn Fn(usize, usize)>,
+    on_progress: Option<ProgressFn>,
 ) -> Result<(i64, i64, i64), String> {
     let mut added = 0i64;
     let mut updated = 0i64;
@@ -565,7 +576,12 @@ pub(crate) fn persist_conversations(
             .prepare("SELECT content_hash FROM conversations WHERE id = ?1")
             .map_err(|e| e.to_string())?;
 
-        for conv in conversations {
+        for (idx, conv) in conversations.iter().enumerate() {
+            if let Some(cb) = on_progress {
+                if idx % 25 == 0 || idx + 1 == conversations.len() {
+                    cb("compare", idx + 1, conversations.len());
+                }
+            }
             let hash = content_hash(conv);
             let existing: Option<String> = existing_hash_stmt
                 .query_row(params![conv.id], |row| row.get(0))
@@ -593,6 +609,12 @@ pub(crate) fn persist_conversations(
     // per conversation that is quadratic — re-importing a 1.7k-conversation
     // export spent almost all of its time there. One scan covers them all.
     if !stale_ids.is_empty() {
+        // No countable unit here — it is deliberately one statement — so the
+        // phase is announced and the UI shows an indeterminate state for it
+        // rather than a bar that sits still.
+        if let Some(cb) = on_progress {
+            cb("clean", 0, 0);
+        }
         tx.execute_batch(
             "CREATE TEMP TABLE IF NOT EXISTS stale_conversations (id TEXT PRIMARY KEY);
              DELETE FROM stale_conversations;",
@@ -650,7 +672,7 @@ pub(crate) fn persist_conversations(
     for (idx, (conv, hash)) in pending.iter().enumerate() {
         if let Some(cb) = on_progress {
             if idx % 5 == 0 || idx + 1 == total {
-                cb(idx + 1, total);
+                cb("db", idx + 1, total);
             }
         }
 
@@ -708,7 +730,7 @@ pub fn import_zip(
     conn: &mut Connection,
     zip_path: &str,
     batch_id: &str,
-    on_progress: Option<&dyn Fn(usize, usize)>,
+    on_progress: Option<ProgressFn>,
 ) -> Result<ImportSummary, String> {
     let raw = read_conversations_json(zip_path)?;
     let arr = raw.as_array().ok_or_else(|| "conversations.json 格式不正确".to_string())?.clone();

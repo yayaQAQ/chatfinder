@@ -5,7 +5,7 @@
 // tool calls, thinking blocks, and instruction wrappers are skipped so the
 // stored transcript stays readable and the FTS index stays clean.
 
-use crate::import::persist_conversations;
+use crate::import::{persist_conversations, ProgressFn};
 use crate::models::{ImportSummary, NormalizedConversation, NormalizedMessage};
 use rusqlite::Connection;
 use serde::Serialize;
@@ -143,7 +143,7 @@ pub fn import_agent_sessions(
     tools: &[String],
     overrides: &HashMap<String, String>,
     batch_id: &str,
-    on_progress: Option<&dyn Fn(usize, usize)>,
+    on_progress: Option<ProgressFn>,
 ) -> Result<ImportSummary, String> {
     let want = |t: &str| tools.is_empty() || tools.iter().any(|x| x == t);
 
