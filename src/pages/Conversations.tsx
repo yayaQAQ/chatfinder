@@ -3,14 +3,16 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   Search, MessageSquare, Inbox, Loader2, X,
   SlidersHorizontal, ArrowUpDown, Calendar, Hash, BrainCircuit,
-  History, FileText, Heading, Star, UserRound, Bot, Trash2,
+  History, FileText, Heading, Star, UserRound, Bot, Trash2, Cpu,
 } from "lucide-react";
-import { api, type ConversationSummary, type ConversationFilter, type SortOption, type RoleFilter, type SearchHit, type FavoriteRow, type EmbedConfig } from "../lib/api";
+import { api, type ConversationSummary, type ConversationFilter, type SortOption, type RoleFilter, type SearchHit, type FavoriteRow, type EmbedConfig, type ModelRow } from "../lib/api";
 import { QuerySnippet, FtsSnippet } from "../lib/highlight";
 import { getRecentSearches, addRecentSearch, removeRecentSearch } from "../lib/searchHistory";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../lib/toast";
 import { useI18n, formatRelativeDate, type TranslationKey } from "../lib/i18n";
+import { platformLabel } from "../lib/platforms";
+import { modelLabel, modelFamily, modelBadgeClass } from "../lib/models";
 
 const PAGE_SIZE = 60;
 
@@ -21,7 +23,6 @@ const platformBadge: Record<string, string> = {
   "claude-code": "bg-amber-100 text-amber-700 border-amber-200",
   codex:         "bg-sky-100 text-sky-700 border-sky-200",
 };
-const platformLabel: Record<string, string> = { claude: "Claude", chatgpt: "ChatGPT", deepseek: "DeepSeek", "claude-code": "Claude Code", codex: "Codex" };
 
 const SORT_OPTIONS: { value: SortOption; labelKey: TranslationKey }[] = [
   { value: "newest",          labelKey: "conversations.sortNewest" },
@@ -56,6 +57,7 @@ export function Conversations({
   const dateTo       = searchParams.get("to")       ?? "";
   const minMsg       = searchParams.get("min")      ?? "";
   const maxMsg       = searchParams.get("max")      ?? "";
+  const model        = searchParams.get("model")    ?? "";
   const role         = (searchParams.get("role")    ?? "") as RoleFilter;
   const sort         = (searchParams.get("sort")    ?? "newest") as SortOption;
   const semanticMode = searchParams.get("semantic") === "1";
@@ -102,12 +104,20 @@ export function Conversations({
   const setDateTo   = (v: string)      => setParam("to", v);
   const setMinMsg   = (v: string)      => setParam("min", v);
   const setMaxMsg   = (v: string)      => setParam("max", v);
+  const setModel    = (v: string)      => setParam("model", v);
   const setRole     = (v: RoleFilter)  => setParam("role", v);
   const setSort     = (v: SortOption)  => setParam("sort", v === "newest" ? "" : v);
 
   const hasQuery = query.trim().length > 0;
 
-  const structuralFilter = { platform, dateFrom, dateTo, minMessages: minMsg ? parseInt(minMsg) : undefined, maxMessages: maxMsg ? parseInt(maxMsg) : undefined, role };
+  const structuralFilter = { platform, dateFrom, dateTo, minMessages: minMsg ? parseInt(minMsg) : undefined, maxMessages: maxMsg ? parseInt(maxMsg) : undefined, model, role };
+
+  // Models present in the library, for the filter's options. Refreshed with
+  // the data (an import can introduce a model that wasn't there before).
+  const [models, setModels] = useState<ModelRow[]>([]);
+  useEffect(() => {
+    api.listModels().then(setModels).catch(() => setModels([]));
+  }, [refreshKey]);
 
   // ── Browse mode (no query): paginated conversation card grid ──
   const [items, setItems]           = useState<ConversationSummary[]>([]);
@@ -133,7 +143,7 @@ export function Conversations({
     }, 180);
     return () => { active = false; clearTimeout(handle); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasQuery, platform, dateFrom, dateTo, minMsg, maxMsg, sort, refreshKey]);
+  }, [hasQuery, platform, dateFrom, dateTo, minMsg, maxMsg, model, sort, refreshKey]);
 
   useEffect(() => {
     if (hasQuery) return;
@@ -156,7 +166,7 @@ export function Conversations({
     observer.observe(el);
     return () => observer.disconnect();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasQuery, platform, dateFrom, dateTo, minMsg, maxMsg, sort, items.length, hasMore, loading, loadingMore]);
+  }, [hasQuery, platform, dateFrom, dateTo, minMsg, maxMsg, model, sort, items.length, hasMore, loading, loadingMore]);
 
   // ── Search mode (query present): keyword or semantic hits + favorites ──
   const embedAvail = embedIndexed > 0;
@@ -198,15 +208,16 @@ export function Conversations({
     }, 1500);
     return () => { clearTimeout(handle); setSearchLoading(false); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, hasQuery, isComposing, semanticMode, embedConfig, platform, dateFrom, dateTo, minMsg, maxMsg, role]);
+  }, [query, hasQuery, isComposing, semanticMode, embedConfig, platform, dateFrom, dateTo, minMsg, maxMsg, model, role]);
 
   // Build human-readable active filter chips
   const activeFilters: ActiveFilter[] = [];
-  if (platform)   activeFilters.push({ label: platformLabel[platform] ?? platform, clear: () => setPlatform("") });
+  if (platform)   activeFilters.push({ label: platformLabel(platform, lang), clear: () => setPlatform("") });
   if (dateFrom)   activeFilters.push({ label: t("conversations.fromPrefix", { date: dateFrom }), clear: () => setDateFrom("") });
   if (dateTo)     activeFilters.push({ label: t("conversations.toPrefix", { date: dateTo }), clear: () => setDateTo("") });
   if (minMsg)     activeFilters.push({ label: t("conversations.minMessagesChip", { n: minMsg }), clear: () => setMinMsg("") });
   if (maxMsg)     activeFilters.push({ label: t("conversations.maxMessagesChip", { n: maxMsg }), clear: () => setMaxMsg("") });
+  if (model)      activeFilters.push({ label: modelLabel(model), clear: () => setModel("") });
   if (hasQuery && role) activeFilters.push({ label: role === "human" ? t("conversations.scopeHumanOnly") : t("conversations.scopeAssistantOnly"), clear: () => setRole("") });
   if (!hasQuery && sort !== "newest") {
     const label = t(SORT_OPTIONS.find(o => o.value === sort)?.labelKey ?? "conversations.sortNewest");
@@ -216,7 +227,7 @@ export function Conversations({
   const clearAll = () => {
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
-      ["platform", "from", "to", "min", "max", "role", "sort"].forEach((k) => next.delete(k));
+      ["platform", "from", "to", "min", "max", "model", "role", "sort"].forEach((k) => next.delete(k));
       return next;
     }, { replace: true });
   };
@@ -346,7 +357,7 @@ export function Conversations({
                     : "border-stone-200 bg-white text-stone-600 hover:bg-stone-100"
                 }`}
               >
-                {p === "" ? t("conversations.allPlatforms") : platformLabel[p] ?? p}
+                {p === "" ? t("conversations.allPlatforms") : platformLabel(p, lang)}
               </button>
             ))}
             {!hasQuery && (
@@ -418,6 +429,44 @@ export function Conversations({
                     className="h-8 w-20 rounded-lg border border-stone-200 bg-white px-2.5 text-xs text-stone-700 outline-none focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
                   />
                 </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <label className="w-28 shrink-0 whitespace-nowrap pt-1 text-xs font-medium text-stone-500 flex items-center gap-1">
+                  <Cpu size={11} />
+                  {t("conversations.filterModelLabel")}
+                </label>
+                {models.length === 0 ? (
+                  <p className="pt-1.5 text-xs text-stone-400">{t("conversations.noModelsYet")}</p>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      onClick={() => setModel("")}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                        model === ""
+                          ? "border-orange-300 bg-orange-100 text-orange-700"
+                          : "border-stone-200 bg-white text-stone-600 hover:bg-stone-100"
+                      }`}
+                    >
+                      {t("conversations.allModels")}
+                    </button>
+                    {models.map((m) => (
+                      <button
+                        key={m.model}
+                        onClick={() => setModel(model === m.model ? "" : m.model)}
+                        title={m.model}
+                        className={`flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                          model === m.model
+                            ? "border-orange-300 bg-orange-100 text-orange-700"
+                            : "border-stone-200 bg-white text-stone-600 hover:bg-stone-100"
+                        }`}
+                      >
+                        {modelLabel(m.model)}
+                        <span className="text-[10px] text-stone-400">{m.conversation_count}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {(hasQuery || searchEverFocused) && (
@@ -529,7 +578,7 @@ export function Conversations({
                       >
                         <div className="mb-2 flex items-center gap-2">
                           <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${platformBadge[h.platform] ?? "bg-stone-100 text-stone-600 border-stone-200"}`}>
-                            {platformLabel[h.platform] ?? h.platform}
+                            {platformLabel(h.platform, lang)}
                           </span>
                           {sim !== null ? (
                             <FileText size={11} className="text-violet-400" />
@@ -628,8 +677,24 @@ export function Conversations({
                   >
                     <div className="mb-2.5 flex items-center gap-2">
                       <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${platformBadge[c.platform] ?? "bg-stone-100 text-stone-600 border-stone-200"}`}>
-                        {platformLabel[c.platform] ?? c.platform}
+                        {platformLabel(c.platform, lang)}
                       </span>
+                      {/* A session can span several models; show the first two
+                          and fold the rest into a "+n" so the row stays put. */}
+                      {c.models.slice(0, 2).map((m) => (
+                        <span
+                          key={m}
+                          title={m}
+                          className={`truncate rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${modelBadgeClass[modelFamily(m)]}`}
+                        >
+                          {modelLabel(m)}
+                        </span>
+                      ))}
+                      {c.models.length > 2 && (
+                        <span title={c.models.join(", ")} className="text-[10px] text-stone-400">
+                          +{c.models.length - 2}
+                        </span>
+                      )}
                       <span className="ml-auto text-xs text-stone-400">{formatRelativeDate(c.updated_at ?? c.created_at, lang, t)}</span>
                       <button
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPendingDelete(c); }}

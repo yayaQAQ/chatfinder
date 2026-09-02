@@ -1,4 +1,7 @@
 import type { zh } from "./zh";
+import { APP_STORE_BUILD } from "../lib/brand";
+
+const CHATGPT = APP_STORE_BUILD ? "AI chat" : "ChatGPT";
 
 export const en: typeof zh = {
   common: {
@@ -20,7 +23,7 @@ export const en: typeof zh = {
   },
   app: {
     dropZipTitle: "Drop to import conversations",
-    dropZipSubtitle: "Auto-detects Claude / ChatGPT format",
+    dropZipSubtitle: `Auto-detects Claude / ${CHATGPT} / DeepSeek format`,
     dropJsonTitle: "Drop to open JSON",
     dropJsonSubtitle: "Open in the JSON viewer",
     dropUnknownTitle: "Unsupported file format",
@@ -57,6 +60,9 @@ export const en: typeof zh = {
     filterDateLabel: "Date",
     dateRangeSeparator: "to",
     filterMessageCountLabel: "Message count",
+    filterModelLabel: "Model",
+    allModels: "All models",
+    noModelsYet: "No model info yet — rescan local agent sessions to filter by model",
     minPlaceholder: "Min",
     maxPlaceholder: "Max",
     filterScopeLabel: "Search scope",
@@ -106,6 +112,11 @@ export const en: typeof zh = {
     searchNoMatches: "No matches",
     deleteConversation: "Delete conversation",
     viewPathConversations: "View all conversations in this directory",
+    filterKinds: "Show content",
+    kindText: "Text",
+    kindToolUse: "Tool calls",
+    kindToolResult: "Tool results",
+    kindThinking: "Thinking",
   },
   pathDialog: {
     title: "Conversations in this directory",
@@ -202,7 +213,7 @@ export const en: typeof zh = {
     title: "Import Conversation History",
     clickToSelect: "Click to select a ZIP file",
     orDrag: "or drag a file into the app window",
-    autoDetectHint: "Auto-detects Claude · ChatGPT · DeepSeek format · Incremental import · Skips duplicates",
+    autoDetectHint: `Auto-detects Claude · ${CHATGPT} · DeepSeek format · Incremental import · Skips duplicates`,
     preparing: "Preparing…",
     parsing: "Parsing file contents…",
     writingDb: "Writing to database",
@@ -215,7 +226,7 @@ export const en: typeof zh = {
     updated: "Updated",
     skipped: "Skipped",
     done: "Done",
-    filePickerTitle: "Select a Claude / ChatGPT export zip file",
+    filePickerTitle: `Select a Claude / ${CHATGPT} / DeepSeek export zip file`,
     filePickerFilterName: "Export archive",
     importFailedToast: "Import failed: {{error}}",
     dbCount: "{{current}} / {{total}}",

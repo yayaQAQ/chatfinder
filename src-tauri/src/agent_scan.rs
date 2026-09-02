@@ -203,49 +203,171 @@ pub fn import_agent_sessions(
     })
 }
 
-// ─── Shared text extraction ──────────────────────────────────────────────────
+// ─── Shared content extraction ───────────────────────────────────────────────
 
-/// Pull plain text out of a message `content` field that may be a string or an
-/// array of typed blocks. Only natural-language blocks (text / input_text /
-/// output_text) are kept; tool_use, tool_result, thinking, images, etc. are
-/// dropped so the transcript reads like a conversation.
-fn extract_plain_text(content: &Value) -> String {
+/// Pull every content block out of a message `content` field (string or array
+/// of typed blocks) as `(kind, text)` pairs. Unlike the old text-only
+/// extraction, tool_use / tool_result / thinking are kept — tagged with their
+/// kind so the frontend can filter which parts to show. tool_use and
+/// tool_result are formatted as markdown code blocks; text and thinking are
+/// returned verbatim.
+fn extract_blocks(content: &Value) -> Vec<(String, String)> {
     match content {
-        Value::String(s) => s.trim().to_string(),
+        Value::String(s) => {
+            let t = s.trim();
+            if t.is_empty() {
+                vec![]
+            } else {
+                vec![("text".to_string(), t.to_string())]
+            }
+        }
         Value::Array(items) => {
-            let parts: Vec<String> = items
-                .iter()
-                .filter_map(|item| {
-                    let ty = item.get("type").and_then(Value::as_str).unwrap_or("");
-                    match ty {
-                        "text" | "input_text" | "output_text" | "" => item
+            let mut out = Vec::new();
+            for item in items {
+                let ty = item.get("type").and_then(Value::as_str).unwrap_or("");
+                match ty {
+                    "text" | "input_text" | "output_text" | "" => {
+                        let s = item
                             .get("text")
                             .or_else(|| item.get("input_text"))
                             .or_else(|| item.get("output_text"))
                             .and_then(Value::as_str)
-                            .map(|s| s.to_string()),
-                        "image" => {
-                            let source = item.get("source")?;
-                            let src_type = source.get("type").and_then(Value::as_str)?;
+                            .unwrap_or("");
+                        if !s.trim().is_empty() {
+                            out.push(("text".to_string(), s.to_string()));
+                        }
+                    }
+                    "tool_use" => out.push(("tool_use".to_string(), format_tool_use(item))),
+                    "tool_result" => out.push(("tool_result".to_string(), format_tool_result(item))),
+                    "thinking" => {
+                        let s = item.get("thinking").and_then(Value::as_str).unwrap_or("");
+                        if !s.trim().is_empty() {
+                            out.push(("thinking".to_string(), s.to_string()));
+                        }
+                    }
+                    "image" => {
+                        if let Some(source) = item.get("source") {
+                            let src_type = source.get("type").and_then(Value::as_str).unwrap_or("");
                             if src_type == "base64" {
                                 let media_type = source
                                     .get("media_type")
                                     .and_then(Value::as_str)
                                     .unwrap_or("image/png");
-                                let data = source.get("data").and_then(Value::as_str)?;
-                                Some(format!("![](<data:{media_type};base64,{data}>)"))
-                            } else {
-                                None
+                                let data = source.get("data").and_then(Value::as_str).unwrap_or("");
+                                if !data.is_empty() {
+                                    out.push((
+                                        "text".to_string(),
+                                        format!("![](<data:{media_type};base64,{data}>)"),
+                                    ));
+                                }
                             }
                         }
-                        _ => None,
                     }
-                })
-                .filter(|s| !s.trim().is_empty())
-                .collect();
-            parts.join("\n\n")
+                    _ => {}
+                }
+            }
+            out
         }
-        _ => String::new(),
+        _ => Vec::new(),
+    }
+}
+
+/// Render a `tool_use` block as markdown. Write/Edit become a code block
+/// (language guessed from the file extension); Bash becomes a bash block;
+/// everything else collapses to a one-line summary. The tool name + target are
+/// kept as a language-neutral inline-code prefix; the localized category label
+/// ("Tool call" / "工具调用") is rendered by the frontend from `kind`.
+fn format_tool_use(block: &Value) -> String {
+    let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
+    let input = block.get("input");
+    match name {
+        "Write" => {
+            let path = input
+                .and_then(|i| i.get("file_path"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let code = input
+                .and_then(|i| i.get("content"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let lang = language_from_path(path);
+            format!("`Write {path}`\n\n```{lang}\n{code}\n```")
+        }
+        "Edit" => {
+            let path = input
+                .and_then(|i| i.get("file_path"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let code = input
+                .and_then(|i| i.get("new_string"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let lang = language_from_path(path);
+            format!("`Edit {path}`\n\n```{lang}\n{code}\n```")
+        }
+        "Bash" => {
+            let command = input
+                .and_then(|i| i.get("command"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            format!("`Bash`\n\n```bash\n{command}\n```")
+        }
+        _ => {
+            let detail = match input {
+                Some(Value::Object(m)) => m
+                    .get("file_path")
+                    .or_else(|| m.get("pattern"))
+                    .or_else(|| m.get("url"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+                _ => "",
+            };
+            if detail.is_empty() {
+                format!("`{name}`")
+            } else {
+                format!("`{name} {detail}`")
+            }
+        }
+    }
+}
+
+/// Render a `tool_result` block (diff / file content / command output) as a
+/// plain code block. No language hint — the content type is ambiguous. The
+/// localized "Tool result" label is added by the frontend from `kind`.
+fn format_tool_result(block: &Value) -> String {
+    let content = block.get("content").and_then(Value::as_str).unwrap_or("");
+    format!("```\n{content}\n```")
+}
+
+/// Best-effort syntax language from a file extension, defaulting to plaintext.
+fn language_from_path(path: &str) -> &'static str {
+    let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "rs" => "rust",
+        "py" | "pyw" => "python",
+        "js" | "jsx" | "mjs" | "cjs" => "javascript",
+        "ts" | "tsx" | "mts" | "cts" => "typescript",
+        "html" | "htm" => "html",
+        "css" => "css",
+        "scss" | "sass" => "scss",
+        "json" => "json",
+        "md" | "markdown" => "markdown",
+        "sh" | "bash" | "zsh" => "bash",
+        "yml" | "yaml" => "yaml",
+        "toml" => "toml",
+        "sql" => "sql",
+        "go" => "go",
+        "java" => "java",
+        "c" | "h" => "c",
+        "cpp" | "hpp" | "cc" | "hh" => "cpp",
+        "rb" => "ruby",
+        "php" => "php",
+        "swift" => "swift",
+        "kt" | "kts" => "kotlin",
+        "vue" => "vue",
+        "svelte" => "svelte",
+        "xml" => "xml",
+        _ => "plaintext",
     }
 }
 
@@ -317,54 +439,50 @@ fn parse_claude_code_session(path: &Path) -> Option<NormalizedConversation> {
             Some(m) => m,
             None => continue,
         };
-        // Skip user turns that only carry a tool_result payload.
-        if ty == "user" {
-            if let Some(Value::Array(items)) = message.get("content") {
-                let all_tool = !items.is_empty()
-                    && items.iter().all(|it| {
-                        it.get("type").and_then(Value::as_str) == Some("tool_result")
-                    });
-                if all_tool {
-                    continue;
-                }
-            }
-        }
-        let text = message
-            .get("content")
-            .map(extract_plain_text)
-            .unwrap_or_default();
-        if text.trim().is_empty() {
+        let ts = value.get("timestamp").and_then(Value::as_str).map(String::from);
+        let turn_uuid = value.get("uuid").and_then(Value::as_str).map(String::from);
+        // Only assistant turns carry `message.model`; a session can switch
+        // models mid-way (/model, or a subagent on a different one), so this
+        // is read per turn rather than once for the file.
+        let turn_model = message.get("model").and_then(Value::as_str).map(String::from);
+
+        // Split the turn's content into per-block messages so tool calls,
+        // results, and thinking are preserved (tagged by `kind`) and filterable.
+        let blocks = message.get("content").map(extract_blocks).unwrap_or_default();
+        if blocks.is_empty() {
             continue;
         }
-        let ts = value.get("timestamp").and_then(Value::as_str).map(String::from);
         if created_at.is_none() {
             created_at = ts.clone();
         }
         if ts.is_some() {
             updated_at = ts.clone();
         }
-        // "meta" = CLI-injected local content riding on a user-role turn —
-        // shown in the transcript but kept out of the human-input count/nav
-        // (ConversationDetail's right panel, title generation) and search
-        // role scoping, since it isn't something the person actually typed.
-        let sender = if ty != "user" {
-            "assistant"
-        } else if is_synthetic_local_wrapper(&text) {
-            "meta"
-        } else {
-            "human"
-        };
-        let msg_id = value
-            .get("uuid")
-            .and_then(Value::as_str)
-            .map(String::from)
-            .unwrap_or_else(|| format!("{session_id}_{}", messages.len()));
-        messages.push(NormalizedMessage {
-            id: msg_id,
-            sender: sender.to_string(),
-            text,
-            created_at: ts,
-        });
+        for (i, (kind, text)) in blocks.into_iter().enumerate() {
+            // "meta" = CLI-injected local content riding on a user-role turn —
+            // shown in the transcript but kept out of the human-input count/nav
+            // and search role scoping. Tool output (tool_use/tool_result/thinking)
+            // is agent-side work, so it's tagged "assistant", never "human".
+            let sender = match kind.as_str() {
+                "tool_use" | "tool_result" | "thinking" => "assistant".to_string(),
+                _ if ty != "user" => "assistant".to_string(),
+                _ if is_synthetic_local_wrapper(&text) => "meta".to_string(),
+                _ => "human".to_string(),
+            };
+            let msg_id = turn_uuid
+                .clone()
+                .map(|u| format!("{u}_{i}"))
+                .unwrap_or_else(|| format!("{session_id}_{}", messages.len()));
+            let model = if sender == "assistant" { turn_model.clone() } else { None };
+            messages.push(NormalizedMessage {
+                id: msg_id,
+                sender,
+                text,
+                created_at: ts.clone(),
+                kind,
+                model,
+            });
+        }
     }
 
     if messages.is_empty() {
@@ -400,6 +518,10 @@ fn parse_codex_session(path: &Path) -> Option<NormalizedConversation> {
     let mut messages: Vec<NormalizedMessage> = Vec::new();
     let mut created_at: Option<String> = None;
     let mut updated_at: Option<String> = None;
+    // Codex records the model on the session/turn envelope rather than on the
+    // message itself; `turn_context` is re-emitted whenever it changes, so we
+    // carry the latest one forward onto the assistant turns that follow.
+    let mut current_model: Option<String> = None;
 
     for line in reader.lines().map_while(Result::ok) {
         let value: Value = match serde_json::from_str(&line) {
@@ -408,6 +530,17 @@ fn parse_codex_session(path: &Path) -> Option<NormalizedConversation> {
         };
         let ty = value.get("type").and_then(Value::as_str).unwrap_or("");
         let ts = value.get("timestamp").and_then(Value::as_str).map(String::from);
+
+        if ty == "turn_context" {
+            if let Some(m) = value
+                .get("payload")
+                .and_then(|p| p.get("model"))
+                .and_then(Value::as_str)
+            {
+                current_model = Some(m.to_string());
+            }
+            continue;
+        }
 
         if ty == "session_meta" {
             let payload = value.get("payload");
@@ -419,6 +552,14 @@ fn parse_codex_session(path: &Path) -> Option<NormalizedConversation> {
                 .and_then(|p| p.get("cwd"))
                 .and_then(Value::as_str)
                 .map(String::from);
+            if current_model.is_none() {
+                current_model = payload
+                    .and_then(|p| p.get("model").or_else(|| {
+                        p.get("collaboration_mode").and_then(|c| c.get("model"))
+                    }))
+                    .and_then(Value::as_str)
+                    .map(String::from);
+            }
             if created_at.is_none() {
                 created_at = ts;
             }
@@ -440,17 +581,8 @@ fn parse_codex_session(path: &Path) -> Option<NormalizedConversation> {
         if role != "user" && role != "assistant" {
             continue;
         }
-        let text = payload
-            .get("content")
-            .map(extract_plain_text)
-            .unwrap_or_default();
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        // The first user turn is Codex's <environment_context>/<user_instructions>
-        // wrapper, not a human message — drop obvious wrappers.
-        if role == "user" && trimmed.starts_with('<') && trimmed.contains("</") {
+        let blocks = payload.get("content").map(extract_blocks).unwrap_or_default();
+        if blocks.is_empty() {
             continue;
         }
         if created_at.is_none() {
@@ -459,19 +591,33 @@ fn parse_codex_session(path: &Path) -> Option<NormalizedConversation> {
         if ts.is_some() {
             updated_at = ts.clone();
         }
-        let sender = if role == "user" { "human" } else { "assistant" };
         let sid = session_id.clone().unwrap_or_else(|| {
             path.file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("codex")
                 .to_string()
         });
-        messages.push(NormalizedMessage {
-            id: format!("{sid}_{}", messages.len()),
-            sender: sender.to_string(),
-            text,
-            created_at: ts,
-        });
+        for (kind, text) in blocks {
+            // Skip Codex's <environment_context>/<user_instructions> wrapper —
+            // a synthetic local-context user turn, not a human message.
+            if role == "user" && kind == "text" && is_synthetic_local_wrapper(&text) {
+                continue;
+            }
+            let sender = match kind.as_str() {
+                "tool_use" | "tool_result" | "thinking" => "assistant".to_string(),
+                _ if role == "user" => "human".to_string(),
+                _ => "assistant".to_string(),
+            };
+            let model = if sender == "assistant" { current_model.clone() } else { None };
+            messages.push(NormalizedMessage {
+                id: format!("{sid}_{}", messages.len()),
+                sender,
+                text,
+                created_at: ts.clone(),
+                kind,
+                model,
+            });
+        }
     }
 
     if messages.is_empty() {
@@ -563,6 +709,80 @@ mod meta_sender_tests {
             "title must not be built from synthetic CLI content, got: {}",
             conv.title
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod model_capture_tests {
+    use super::*;
+    use std::io::Write;
+
+    /// A session can switch models mid-way (`/model`, or a subagent running on
+    /// a different one), so the model is read per assistant turn — not once for
+    /// the file — and human/meta turns carry none.
+    #[test]
+    fn claude_code_records_the_model_of_each_assistant_turn() {
+        let dir = std::env::temp_dir().join(format!("cc_model_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+        let mut f = File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"user","cwd":"/tmp/proj","timestamp":"2026-01-01T00:00:00Z","uuid":"u1","message":{{"content":"hi"}}}}"#
+        ).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"assistant","timestamp":"2026-01-01T00:00:01Z","uuid":"a1","message":{{"model":"claude-sonnet-4-6","content":"hello"}}}}"#
+        ).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"assistant","timestamp":"2026-01-01T00:00:02Z","uuid":"a2","message":{{"model":"claude-opus-5","content":"switched"}}}}"#
+        ).unwrap();
+        drop(f);
+
+        let conv = parse_claude_code_session(&path).expect("should parse");
+        let models: Vec<Option<&str>> = conv.messages.iter().map(|m| m.model.as_deref()).collect();
+        assert_eq!(
+            models,
+            vec![None, Some("claude-sonnet-4-6"), Some("claude-opus-5")],
+            "each assistant turn keeps its own model; the human turn has none"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Codex puts the model on the `turn_context` envelope rather than on the
+    /// message, and re-emits it when it changes — it has to be carried forward
+    /// onto the assistant turns that follow.
+    #[test]
+    fn codex_carries_the_turn_context_model_onto_following_turns() {
+        let dir = std::env::temp_dir().join(format!("codex_model_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rollout-test.jsonl");
+        let mut f = File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{{"id":"s1","cwd":"/tmp/proj"}}}}"#
+        ).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"turn_context","timestamp":"2026-01-01T00:00:01Z","payload":{{"model":"gpt-5.6-sol"}}}}"#
+        ).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"response_item","timestamp":"2026-01-01T00:00:02Z","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"hi"}}]}}}}"#
+        ).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"response_item","timestamp":"2026-01-01T00:00:03Z","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"hello"}}]}}}}"#
+        ).unwrap();
+        drop(f);
+
+        let conv = parse_codex_session(&path).expect("should parse");
+        let models: Vec<Option<&str>> = conv.messages.iter().map(|m| m.model.as_deref()).collect();
+        assert_eq!(models, vec![None, Some("gpt-5.6-sol")]);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

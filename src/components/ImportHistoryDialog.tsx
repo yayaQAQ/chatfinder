@@ -4,15 +4,7 @@ import { api, type ImportBatchRow } from "../lib/api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useToast } from "../lib/toast";
 import { useI18n, formatLongDate } from "../lib/i18n";
-
-const platformLabel: Record<string, string> = {
-  claude: "Claude",
-  chatgpt: "ChatGPT",
-  deepseek: "DeepSeek",
-  "claude-code": "Claude Code",
-  codex: "Codex",
-  agent: "Claude Code + Codex",
-};
+import { platformLabel } from "../lib/platforms";
 
 function sourceLabel(sourceFile: string, agentScanLabel: string): string {
   if (sourceFile === "local-agent-scan") return agentScanLabel;
@@ -95,7 +87,7 @@ export function ImportHistoryDialog({ onClose, onDeleted }: { onClose: () => voi
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-medium text-stone-600">
-                      {platformLabel[b.platform] ?? b.platform}
+                      {platformLabel(b.platform, lang)}
                     </span>
                     <span className="text-xs text-stone-400">{formatLongDate(b.imported_at, lang)}</span>
                   </div>

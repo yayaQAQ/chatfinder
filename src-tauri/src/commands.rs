@@ -4,7 +4,8 @@ use crate::embed;
 use crate::import;
 use crate::keywords;
 use crate::models::{
-    ConversationSummary, EmbeddingStats, FavoriteRow, ImportBatchRow, ImportSummary, MessageRow, SearchHit, TagRow,
+    ConversationSummary, EmbeddingStats, FavoriteRow, ImportBatchRow, ImportSummary, MessageRow,
+    ModelRow, SearchHit, TagRow,
 };
 use rusqlite::params;
 use serde::Serialize;
@@ -59,6 +60,21 @@ fn sort_clause(sort: &str) -> &'static str {
     }
 }
 
+/// `conversations.models` holds the distinct models of a conversation joined
+/// with commas (see import::distinct_models). Model ids never contain a comma.
+fn split_models(raw: &str) -> Vec<String> {
+    raw.split(',').filter(|s| !s.is_empty()).map(String::from).collect()
+}
+
+/// SQL predicate matching one model inside that comma-joined column. Wrapping
+/// both sides in commas keeps it an exact element match, so "gpt-5" doesn't
+/// match "gpt-5-codex".
+const MODEL_MATCH: &str = "(?{n} = '' OR INSTR(',' || {col} || ',', ',' || ?{n} || ',') > 0)";
+
+fn model_clause(col: &str, n: usize) -> String {
+    MODEL_MATCH.replace("{col}", col).replace("{n}", &n.to_string())
+}
+
 #[tauri::command]
 pub fn list_conversations(
     state: State<DbState>,
@@ -68,6 +84,7 @@ pub fn list_conversations(
     date_to: Option<String>,
     min_messages: Option<i64>,
     max_messages: Option<i64>,
+    model_filter: Option<String>,
     sort: Option<String>,
     limit: i64,
     offset: i64,
@@ -80,26 +97,29 @@ pub fn list_conversations(
     let dt = date_to.unwrap_or_default();
     let min_msg = min_messages.unwrap_or(0);
     let max_msg = max_messages.unwrap_or(0); // 0 = no upper limit
+    let model = model_filter.unwrap_or_default();
     let sort_str = sort.as_deref().unwrap_or("newest");
     let order = sort_clause(sort_str);
 
     let mut rows_out = Vec::new();
 
     if trimmed_query.is_empty() {
+        let model_sql = model_clause("models", 6);
         let sql = format!(
-            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count
+            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count, models
              FROM conversations
              WHERE (?1 = '' OR platform = ?1)
                AND (?2 = '' OR DATE(COALESCE(updated_at, created_at, imported_at)) >= ?2)
                AND (?3 = '' OR DATE(COALESCE(updated_at, created_at, imported_at)) <= ?3)
                AND (?4 = 0 OR message_count >= ?4)
                AND (?5 = 0 OR message_count <= ?5)
+               AND {model_sql}
              ORDER BY {order}
-             LIMIT ?6 OFFSET ?7"
+             LIMIT ?7 OFFSET ?8"
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let mut rows = stmt
-            .query(params![plat_filter, df, dt, min_msg, max_msg, limit, offset])
+            .query(params![plat_filter, df, dt, min_msg, max_msg, model, limit, offset])
             .map_err(|e| e.to_string())?;
         while let Some(row) = rows.next().map_err(|e| e.to_string())? {
             rows_out.push(ConversationSummary {
@@ -111,12 +131,14 @@ pub fn list_conversations(
                 created_at: row.get(5).map_err(|e| e.to_string())?,
                 updated_at: row.get(6).map_err(|e| e.to_string())?,
                 message_count: row.get(7).map_err(|e| e.to_string())?,
+                models: split_models(&row.get::<_, String>(8).map_err(|e| e.to_string())?),
             });
         }
     } else {
         let fts_query = format!("{}*", trimmed_query.replace('"', " "));
+        let model_sql = model_clause("c.models", 7);
         let sql = format!(
-            "SELECT c.id, c.platform, c.title, c.summary, c.url, c.created_at, c.updated_at, c.message_count
+            "SELECT c.id, c.platform, c.title, c.summary, c.url, c.created_at, c.updated_at, c.message_count, c.models
              FROM search_index si
              JOIN conversations c ON c.id = si.conversation_id
              WHERE si.text MATCH ?1
@@ -125,12 +147,13 @@ pub fn list_conversations(
                AND (?4 = '' OR DATE(COALESCE(c.updated_at, c.created_at)) <= ?4)
                AND (?5 = 0 OR c.message_count >= ?5)
                AND (?6 = 0 OR c.message_count <= ?6)
+               AND {model_sql}
              ORDER BY bm25(search_index) ASC
              LIMIT 500"
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let mut rows = stmt
-            .query(params![fts_query, plat_filter, df, dt, min_msg, max_msg])
+            .query(params![fts_query, plat_filter, df, dt, min_msg, max_msg, model])
             .map_err(|e| e.to_string())?;
         let mut seen = std::collections::HashSet::new();
         let mut ranked = Vec::new();
@@ -146,6 +169,7 @@ pub fn list_conversations(
                 created_at: row.get(5).map_err(|e| e.to_string())?,
                 updated_at: row.get(6).map_err(|e| e.to_string())?,
                 message_count: row.get(7).map_err(|e| e.to_string())?,
+                models: split_models(&row.get::<_, String>(8).map_err(|e| e.to_string())?),
             });
         }
         let start = offset.max(0) as usize;
@@ -163,6 +187,35 @@ pub fn count_conversations(state: State<DbState>) -> Result<i64, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Every model seen across imported conversations, most used first — feeds
+/// the model filter in the UI. Counted per conversation (not per message) so
+/// a long session doesn't outweigh many short ones.
+#[tauri::command]
+pub fn list_models(state: State<DbState>) -> Result<Vec<ModelRow>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT models FROM conversations WHERE models != ''")
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+    let mut counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let raw: String = row.get(0).map_err(|e| e.to_string())?;
+        for m in split_models(&raw) {
+            *counts.entry(m).or_insert(0) += 1;
+        }
+    }
+    let mut out: Vec<ModelRow> = counts
+        .into_iter()
+        .map(|(model, conversation_count)| ModelRow { model, conversation_count })
+        .collect();
+    out.sort_by(|a, b| {
+        b.conversation_count
+            .cmp(&a.conversation_count)
+            .then_with(|| a.model.cmp(&b.model))
+    });
+    Ok(out)
+}
+
 #[tauri::command]
 pub fn get_conversation(
     state: State<DbState>,
@@ -171,7 +224,7 @@ pub fn get_conversation(
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let conv = conn
         .query_row(
-            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count FROM conversations WHERE id = ?1",
+            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count, models FROM conversations WHERE id = ?1",
             params![id],
             |row| {
                 Ok(ConversationSummary {
@@ -183,13 +236,14 @@ pub fn get_conversation(
                     created_at: row.get(5)?,
                     updated_at: row.get(6)?,
                     message_count: row.get(7)?,
+                    models: split_models(&row.get::<_, String>(8)?),
                 })
             },
         )
         .map_err(|e| e.to_string())?;
 
     let mut stmt = conn
-        .prepare("SELECT id, conversation_id, sender, text, created_at, seq FROM messages WHERE conversation_id = ?1 ORDER BY seq ASC")
+        .prepare("SELECT id, conversation_id, sender, text, created_at, seq, kind, model FROM messages WHERE conversation_id = ?1 ORDER BY seq ASC")
         .map_err(|e| e.to_string())?;
     let mut rows = stmt.query(params![id]).map_err(|e| e.to_string())?;
     let mut messages = Vec::new();
@@ -201,6 +255,8 @@ pub fn get_conversation(
             text: row.get(3).map_err(|e| e.to_string())?,
             created_at: row.get(4).map_err(|e| e.to_string())?,
             seq: row.get(5).map_err(|e| e.to_string())?,
+            kind: row.get(6).map_err(|e| e.to_string())?,
+            model: row.get(7).map_err(|e| e.to_string())?,
         });
     }
 
@@ -217,7 +273,7 @@ pub fn list_conversations_by_path(state: State<DbState>, path: String) -> Result
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count
+            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count, models
              FROM conversations
              WHERE summary = ?1 AND summary != ''
              ORDER BY COALESCE(updated_at, created_at) DESC",
@@ -234,6 +290,7 @@ pub fn list_conversations_by_path(state: State<DbState>, path: String) -> Result
                 created_at: row.get(5)?,
                 updated_at: row.get(6)?,
                 message_count: row.get(7)?,
+                models: split_models(&row.get::<_, String>(8)?),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -385,6 +442,7 @@ pub fn search_all(
     date_to: Option<String>,
     min_messages: Option<i64>,
     max_messages: Option<i64>,
+    model_filter: Option<String>,
     role: Option<String>,
 ) -> Result<Vec<SearchHit>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
@@ -397,6 +455,7 @@ pub fn search_all(
     let dt = date_to.unwrap_or_default();
     let min_msg = min_messages.unwrap_or(0);
     let max_msg = max_messages.unwrap_or(0);
+    let model = model_filter.unwrap_or_default();
     let role_filter = role.unwrap_or_default();
 
     let fts_query = format!("{}*", trimmed.replace('"', " "));
@@ -404,25 +463,26 @@ pub fn search_all(
     // conversation id for kind='title' hits, so title hits get sender=NULL and are
     // naturally excluded whenever a role filter is active (a title isn't "user
     // input" or "AI output").
-    let mut stmt = conn
-        .prepare(
-            "SELECT si.ref_id, si.conversation_id, si.kind, snippet(search_index, 3, '【', '】', '…', 12),
-                    c.title, c.platform, c.updated_at, c.created_at
-             FROM search_index si
-             JOIN conversations c ON c.id = si.conversation_id
-             LEFT JOIN messages m ON m.id = si.ref_id
-             WHERE si.text MATCH ?1
-               AND (?2 = '' OR c.platform = ?2)
-               AND (?3 = '' OR DATE(COALESCE(c.updated_at, c.created_at)) >= ?3)
-               AND (?4 = '' OR DATE(COALESCE(c.updated_at, c.created_at)) <= ?4)
-               AND (?5 = 0 OR c.message_count >= ?5)
-               AND (?6 = 0 OR c.message_count <= ?6)
-               AND (?7 = '' OR m.sender = ?7)
-             ORDER BY bm25(search_index) ASC LIMIT 400",
-        )
-        .map_err(|e| e.to_string())?;
+    let model_sql = model_clause("c.models", 8);
+    let sql = format!(
+        "SELECT si.ref_id, si.conversation_id, si.kind, snippet(search_index, 3, '【', '】', '…', 12),
+                c.title, c.platform, c.updated_at, c.created_at
+         FROM search_index si
+         JOIN conversations c ON c.id = si.conversation_id
+         LEFT JOIN messages m ON m.id = si.ref_id
+         WHERE si.text MATCH ?1
+           AND (?2 = '' OR c.platform = ?2)
+           AND (?3 = '' OR DATE(COALESCE(c.updated_at, c.created_at)) >= ?3)
+           AND (?4 = '' OR DATE(COALESCE(c.updated_at, c.created_at)) <= ?4)
+           AND (?5 = 0 OR c.message_count >= ?5)
+           AND (?6 = 0 OR c.message_count <= ?6)
+           AND (?7 = '' OR m.sender = ?7)
+           AND {model_sql}
+         ORDER BY bm25(search_index) ASC LIMIT 400"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let mut rows = stmt
-        .query(params![fts_query, plat_filter, df, dt, min_msg, max_msg, role_filter])
+        .query(params![fts_query, plat_filter, df, dt, min_msg, max_msg, role_filter, model])
         .map_err(|e| e.to_string())?;
     let mut hits = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -883,6 +943,7 @@ pub async fn semantic_search(
     date_to: Option<String>,
     min_messages: Option<i64>,
     max_messages: Option<i64>,
+    model_filter: Option<String>,
     role: Option<String>,
 ) -> Result<Vec<SearchHit>, String> {
     if query.trim().is_empty() {
@@ -893,6 +954,9 @@ pub async fn semantic_search(
     let dt = date_to.unwrap_or_default();
     let min_msg = min_messages.unwrap_or(0);
     let max_msg = max_messages.unwrap_or(0);
+    // Named apart from `model` (the embedding model) — this is the filter on
+    // which model produced the conversation.
+    let conv_model = model_filter.unwrap_or_default();
     let role_filter = role.unwrap_or_default();
 
     // 1. Embed the query — no lock held during network call
@@ -944,15 +1008,19 @@ pub async fn semantic_search(
         #[allow(clippy::type_complexity)]
         let row: Option<(String, String, String, Option<String>, Option<String>, i64)> = conn
             .query_row(
-                "SELECT m.text, c.title, c.platform, c.updated_at, c.created_at, c.message_count
-                 FROM messages m JOIN conversations c ON c.id = m.conversation_id
-                 WHERE m.id = ?1
-                   AND (?2 = '' OR c.platform = ?2)
-                   AND (?3 = '' OR DATE(COALESCE(c.updated_at, c.created_at)) >= ?3)
-                   AND (?4 = '' OR DATE(COALESCE(c.updated_at, c.created_at)) <= ?4)
-                   AND (?5 = 0 OR c.message_count >= ?5)
-                   AND (?6 = 0 OR c.message_count <= ?6)",
-                params![msg_id, plat_filter, df, dt, min_msg, max_msg],
+                &format!(
+                    "SELECT m.text, c.title, c.platform, c.updated_at, c.created_at, c.message_count
+                     FROM messages m JOIN conversations c ON c.id = m.conversation_id
+                     WHERE m.id = ?1
+                       AND (?2 = '' OR c.platform = ?2)
+                       AND (?3 = '' OR DATE(COALESCE(c.updated_at, c.created_at)) >= ?3)
+                       AND (?4 = '' OR DATE(COALESCE(c.updated_at, c.created_at)) <= ?4)
+                       AND (?5 = 0 OR c.message_count >= ?5)
+                       AND (?6 = 0 OR c.message_count <= ?6)
+                       AND {}",
+                    model_clause("c.models", 7)
+                ),
+                params![msg_id, plat_filter, df, dt, min_msg, max_msg, conv_model],
                 |r| {
                     Ok((
                         r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?,
@@ -1342,6 +1410,60 @@ mod delete_tests {
         let remaining_msg: i64 = conn.query_row("SELECT COUNT(*) FROM messages WHERE conversation_id = 'conv-2'", [], |r| r.get(0)).unwrap();
         let remaining_fts: i64 = conn.query_row("SELECT COUNT(*) FROM search_index WHERE conversation_id = 'conv-2'", [], |r| r.get(0)).unwrap();
         assert_eq!((remaining_conv, remaining_msg, remaining_fts), (1, 1, 1), "unrelated conversation must survive untouched");
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+}
+
+#[cfg(test)]
+mod model_filter_tests {
+    use super::*;
+
+    /// Models are stored comma-joined on the conversation row, so the filter
+    /// has to match a whole element: picking "gpt-5" must not also return the
+    /// sessions that ran on "gpt-5-codex", and a conversation that used a
+    /// model at any point must match even when it also used others.
+    #[test]
+    fn model_filter_matches_whole_entries_only() {
+        let db_path = std::env::temp_dir().join(format!("chatvault_test_model_filter_{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&db_path);
+        let conn = crate::db::open(&db_path).unwrap();
+        conn.execute_batch(
+            "
+            INSERT INTO conversations (id, platform, title, models, imported_at)
+                VALUES ('a', 'claude-code', 'Opus only', 'claude-opus-5', '2026-01-01T00:00:00Z');
+            INSERT INTO conversations (id, platform, title, models, imported_at)
+                VALUES ('b', 'claude-code', 'Switched mid-session', 'claude-sonnet-4-6,claude-opus-5', '2026-01-01T00:00:00Z');
+            INSERT INTO conversations (id, platform, title, models, imported_at)
+                VALUES ('c', 'codex', 'Codex', 'gpt-5-codex', '2026-01-01T00:00:00Z');
+            INSERT INTO conversations (id, platform, title, models, imported_at)
+                VALUES ('d', 'codex', 'Plain GPT-5', 'gpt-5', '2026-01-01T00:00:00Z');
+            INSERT INTO conversations (id, platform, title, imported_at)
+                VALUES ('e', 'claude', 'ZIP import, no model recorded', '2026-01-01T00:00:00Z');
+            ",
+        )
+        .unwrap();
+
+        let matching = |model: &str| -> Vec<String> {
+            let sql = format!(
+                "SELECT id FROM conversations WHERE {} ORDER BY id",
+                model_clause("models", 1)
+            );
+            let mut stmt = conn.prepare(&sql).unwrap();
+            stmt.query_map(params![model], |r| r.get::<_, String>(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+
+        assert_eq!(matching("claude-opus-5"), vec!["a", "b"], "matches any position in the list");
+        assert_eq!(matching("gpt-5"), vec!["d"], "must not match the 'gpt-5-codex' prefix");
+        assert_eq!(matching("gpt-5-codex"), vec!["c"]);
+        assert_eq!(
+            matching(""),
+            vec!["a", "b", "c", "d", "e"],
+            "an empty filter is 'all models', including conversations with none recorded"
+        );
 
         let _ = std::fs::remove_file(&db_path);
     }

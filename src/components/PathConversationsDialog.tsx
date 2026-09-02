@@ -4,14 +4,8 @@ import { X, FolderOpen, Loader2, MessageSquare, Search, FileText, Heading } from
 import { api, type ConversationSummary, type SearchHit } from "../lib/api";
 import { FtsSnippet } from "../lib/highlight";
 import { useI18n, formatRelativeDate } from "../lib/i18n";
+import { platformLabel } from "../lib/platforms";
 
-const platformLabel: Record<string, string> = {
-  claude: "Claude",
-  chatgpt: "ChatGPT",
-  deepseek: "DeepSeek",
-  "claude-code": "Claude Code",
-  codex: "Codex",
-};
 const platformColor: Record<string, string> = {
   "claude-code": "from-amber-400 to-orange-600",
   codex: "from-sky-400 to-indigo-500",
@@ -121,7 +115,7 @@ export function PathConversationsDialog({
                           platformColor[h.platform] ?? "from-stone-400 to-stone-600"
                         }`}
                       >
-                        {(platformLabel[h.platform] ?? h.platform)[0]}
+                        {platformLabel(h.platform, lang)[0]}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
@@ -168,14 +162,14 @@ export function PathConversationsDialog({
                         platformColor[c.platform] ?? "from-stone-400 to-stone-600"
                       }`}
                     >
-                      {(platformLabel[c.platform] ?? c.platform)[0]}
+                      {platformLabel(c.platform, lang)[0]}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-stone-700">
                         {c.title || t("common.untitledConversation")}
                       </p>
                       <div className="flex items-center gap-1.5 text-xs text-stone-400">
-                        <span>{platformLabel[c.platform] ?? c.platform}</span>
+                        <span>{platformLabel(c.platform, lang)}</span>
                         <span>·</span>
                         <MessageSquare size={10} />
                         <span>{t("common.messageCount", { n: c.message_count })}</span>

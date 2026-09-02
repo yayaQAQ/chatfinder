@@ -1,3 +1,9 @@
+import { APP_STORE_BUILD } from "../lib/brand";
+
+// The App Store build shows a neutral name instead of the ChatGPT brand
+// (see brand.ts); everything else in the copy is identical.
+const CHATGPT = APP_STORE_BUILD ? "AI 对话" : "ChatGPT";
+
 export const zh = {
   common: {
     cancel: "取消",
@@ -18,7 +24,7 @@ export const zh = {
   },
   app: {
     dropZipTitle: "松手导入对话",
-    dropZipSubtitle: "自动识别 Claude / ChatGPT 格式",
+    dropZipSubtitle: `自动识别 Claude / ${CHATGPT} / DeepSeek 格式`,
     dropJsonTitle: "松手打开 JSON",
     dropJsonSubtitle: "在 JSON 查看器中打开",
     dropUnknownTitle: "不支持此文件格式",
@@ -55,6 +61,9 @@ export const zh = {
     filterDateLabel: "日期",
     dateRangeSeparator: "至",
     filterMessageCountLabel: "消息数",
+    filterModelLabel: "模型",
+    allModels: "全部模型",
+    noModelsYet: "尚无模型信息，重新扫描本地 Agent 会话后即可按模型筛选",
     minPlaceholder: "最少",
     maxPlaceholder: "最多",
     filterScopeLabel: "搜索范围",
@@ -104,6 +113,11 @@ export const zh = {
     searchNoMatches: "无匹配结果",
     deleteConversation: "删除对话",
     viewPathConversations: "查看此目录下的所有对话",
+    filterKinds: "显示内容",
+    kindText: "文本",
+    kindToolUse: "工具调用",
+    kindToolResult: "工具结果",
+    kindThinking: "思考过程",
   },
   pathDialog: {
     title: "同目录下的对话",
@@ -200,7 +214,7 @@ export const zh = {
     title: "导入对话历史",
     clickToSelect: "点击选择 ZIP 文件",
     orDrag: "或将文件拖入应用窗口",
-    autoDetectHint: "自动识别 Claude · ChatGPT · DeepSeek 格式 · 增量导入 · 跳过重复",
+    autoDetectHint: `自动识别 Claude · ${CHATGPT} · DeepSeek 格式 · 增量导入 · 跳过重复`,
     preparing: "准备中…",
     parsing: "解析文件内容…",
     writingDb: "写入数据库",
@@ -213,7 +227,7 @@ export const zh = {
     updated: "更新",
     skipped: "跳过",
     done: "完成",
-    filePickerTitle: "选择 Claude / ChatGPT 导出的 zip 文件",
+    filePickerTitle: `选择 Claude / ${CHATGPT} / DeepSeek 导出的 zip 文件`,
     filePickerFilterName: "导出压缩包",
     importFailedToast: "导入失败：{{error}}",
     dbCount: "{{current}} / {{total}} 条",

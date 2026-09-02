@@ -63,6 +63,18 @@ To build a release binary:
 npm run tauri build
 ```
 
+### Build variants
+
+The Mac App Store build cannot carry the ChatGPT brand (App Store Review
+Guideline 5), so it shows a neutral "AI chat" name and omits the OpenAI
+embedding preset. It is the same code behind a build-time flag — see
+`src/lib/brand.ts` — not a separate branch:
+
+```bash
+npm run tauri build                # public build
+npm run tauri:build:appstore       # App Store build (VITE_APP_STORE=1)
+```
+
 ## Usage
 
 1. Launch the app and use **Import** to select an export ZIP (from Claude, ChatGPT, or DeepSeek's "export data" feature), or use **Scan agent sessions** to pull in local Claude Code / Codex CLI history.

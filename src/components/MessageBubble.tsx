@@ -9,6 +9,7 @@ import type { MessageRow } from "../lib/api";
 import { markdownUrlTransform } from "../lib/markdown";
 import { rehypeHighlightQuery } from "../lib/highlightPlugin";
 import { useI18n, formatDateTime } from "../lib/i18n";
+import { modelLabel } from "../lib/models";
 
 function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
   useEffect(() => {
@@ -183,6 +184,16 @@ function MessageBubbleImpl({
 }) {
   const { t, lang } = useI18n();
   const isHuman = message.sender === "human";
+  // Localized category label for non-text agent content (tool calls, results,
+  // thinking). The raw content itself is stored language-neutral.
+  const kindHeader = (() => {
+    switch (message.kind) {
+      case "tool_use": return { icon: "🔧", label: t("conversationDetail.kindToolUse") };
+      case "tool_result": return { icon: "📄", label: t("conversationDetail.kindToolResult") };
+      case "thinking": return { icon: "💭", label: t("conversationDetail.kindThinking") };
+      default: return null;
+    }
+  })();
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   // Stable reference so ReactMarkdown doesn't treat these as new component
   // types on every re-render — that would remount the DOM and clear any
@@ -255,6 +266,12 @@ function MessageBubbleImpl({
         }`}
       >
         <div className="message-content">
+          {kindHeader && (
+            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-stone-400">
+              <span>{kindHeader.icon}</span>
+              <span>{kindHeader.label}</span>
+            </div>
+          )}
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={rehypePlugins}
@@ -264,9 +281,19 @@ function MessageBubbleImpl({
             {message.text || t("messageBubble.emptyMessage")}
           </ReactMarkdown>
         </div>
-        {message.created_at && (
-          <div className={`mt-1.5 text-[11px] text-stone-400 ${isHuman ? "text-right" : ""}`}>
-            {formatDateTime(message.created_at, lang)}
+        {(message.created_at || message.model) && (
+          <div className={`mt-1.5 flex items-center gap-1.5 text-[11px] text-stone-400 ${isHuman ? "justify-end" : ""}`}>
+            {message.created_at && <span>{formatDateTime(message.created_at, lang)}</span>}
+            {/* Which model wrote this turn — shown per message because a
+                session can switch models partway through. */}
+            {message.model && (
+              <span
+                title={message.model}
+                className="rounded bg-stone-100 px-1.5 py-0.5 font-medium text-stone-500"
+              >
+                {modelLabel(message.model)}
+              </span>
+            )}
           </div>
         )}
       </div>

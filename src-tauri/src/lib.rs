@@ -59,6 +59,7 @@ pub fn run() {
             commands::import_zip_file,
             commands::list_conversations,
             commands::count_conversations,
+            commands::list_models,
             commands::get_conversation,
             commands::list_conversations_by_path,
             commands::search_conversations_by_path,
