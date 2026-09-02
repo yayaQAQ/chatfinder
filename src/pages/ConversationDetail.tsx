@@ -4,7 +4,7 @@ import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ArrowLeft, ExternalLink, Star, MessageSquare, Copy, Check, PanelRightClose, PanelRight,
-  Search, ChevronUp, ChevronDown, X, Trash2, FolderOpen, Settings,
+  Search, ChevronUp, ChevronDown, X, Trash2, FolderOpen, Settings, ListFilter,
 } from "lucide-react";
 import { api, type ConversationSummary, type MessageRow } from "../lib/api";
 import { FavoriteModal } from "../components/FavoriteModal";
@@ -13,9 +13,10 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PathConversationsDialog } from "../components/PathConversationsDialog";
 import { TerminalSettings } from "../components/TerminalSettings";
 import { selectionToMarkdown } from "../lib/markdown";
-import { useI18n, formatLongDate } from "../lib/i18n";
+import { useI18n, formatLongDate, type TranslationKey } from "../lib/i18n";
 import { useToast } from "../lib/toast";
 import { platformLabel } from "../lib/platforms";
+import { modelLabel, modelFamily, modelBadgeClass } from "../lib/models";
 
 function stripForPreview(text: string, imagePlaceholder: string): string {
   return text
@@ -30,6 +31,17 @@ function stripForPreview(text: string, imagePlaceholder: string): string {
     .replace(/\n+/g, " ")
     .trim();
 }
+
+// The content categories an agent message can carry. The filter lets the user
+// choose which of these to display in the transcript; the selection is stored
+// globally (settings key `visible_kinds`, comma-separated) and defaults to
+// text-only so the transcript stays readable.
+const MESSAGE_KINDS: { value: string; labelKey: TranslationKey }[] = [
+  { value: "text", labelKey: "conversationDetail.kindText" },
+  { value: "tool_use", labelKey: "conversationDetail.kindToolUse" },
+  { value: "tool_result", labelKey: "conversationDetail.kindToolResult" },
+  { value: "thinking", labelKey: "conversationDetail.kindThinking" },
+];
 
 export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => void } = {}) {
   const { t, lang } = useI18n();
@@ -53,7 +65,10 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
   const [panelOpen, setPanelOpen] = useState(true);
   const [terminalSettingsOpen, setTerminalSettingsOpen] = useState(false);
   const [resumeSettings, setResumeSettings] = useState({ proxy: "", claudeArgs: "", codexArgs: "" });
+  const [visibleKinds, setVisibleKinds] = useState<Set<string>>(new Set(["text"]));
+  const [filterOpen, setFilterOpen] = useState(false);
   const humanMessages = messages.filter((m) => m.sender === "human");
+  const visibleMessages = messages.filter((m) => visibleKinds.has(m.kind || "text"));
 
   // Proxy + extra args for the "resume in terminal" command (terminal app choice
   // is read server-side). Re-loaded after the TerminalSettings dialog saves.
@@ -72,6 +87,24 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
   useEffect(() => {
     loadResumeSettings();
   }, [loadResumeSettings]);
+
+  // Which content kinds are displayed — persisted globally, defaults to text-only.
+  useEffect(() => {
+    api.getSetting("visible_kinds").then((v) => {
+      if (v) {
+        const kinds = v.split(",").filter(Boolean);
+        if (kinds.length > 0) setVisibleKinds(new Set(kinds));
+      }
+    }).catch(() => {});
+  }, []);
+
+  const toggleKind = (kind: string) => {
+    const next = new Set(visibleKinds);
+    if (next.has(kind)) next.delete(kind); else next.add(kind);
+    setVisibleKinds(next);
+    const enabled = MESSAGE_KINDS.filter((k) => next.has(k.value)).map((k) => k.value).join(",");
+    api.setSetting("visible_kinds", enabled).catch(() => {});
+  };
 
   // In-conversation search: client-side, scoped to the messages already
   // loaded for this conversation — not the global keyword/semantic search.
@@ -288,6 +321,17 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
               {platformLabelText} · {t("common.messageCount", { n: conv.message_count })}
               {conv.updated_at ? ` · ${formatLongDate(conv.updated_at, lang)}` : ""}
             </p>
+            {/* Every model this session ran on — a session can switch mid-way,
+                so all of them are listed, in the order they first appear. */}
+            {conv.models.map((m) => (
+              <span
+                key={m}
+                title={m}
+                className={`rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${modelBadgeClass[modelFamily(m)]}`}
+              >
+                {modelLabel(m)}
+              </span>
+            ))}
             <button
               onClick={() => {
                 navigator.clipboard.writeText(conv.id);
@@ -313,6 +357,38 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
           )}
         </div>
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <button
+              onClick={() => setFilterOpen((v) => !v)}
+              title={t("conversationDetail.filterKinds")}
+              className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors ${
+                filterOpen ? "bg-amber-100 text-amber-600" : "text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+              }`}
+            >
+              <ListFilter size={15} />
+            </button>
+            {filterOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setFilterOpen(false)} />
+                <div className="absolute right-0 top-10 z-20 w-44 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl">
+                  {MESSAGE_KINDS.map((k) => (
+                    <label
+                      key={k.value}
+                      className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-stone-700 hover:bg-stone-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={visibleKinds.has(k.value)}
+                        onChange={() => toggleKind(k.value)}
+                        className="h-3.5 w-3.5 accent-amber-600"
+                      />
+                      {t(k.labelKey)}
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={() => setSearchOpen((v) => !v)}
             title={t("conversationDetail.searchInConversation")}
@@ -422,7 +498,7 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
               </div>
             )}
             <div className="flex flex-col gap-5">
-              {messages.map((m) => (
+              {visibleMessages.map((m) => (
                 <MessageBubble
                   key={m.id}
                   message={m}

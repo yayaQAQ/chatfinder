@@ -6,6 +6,11 @@ pub struct NormalizedMessage {
     pub sender: String, // "human" | "assistant" | "meta" (CLI-injected local content, not human-typed)
     pub text: String,
     pub created_at: Option<String>,
+    pub kind: String, // "text" | "tool_use" | "tool_result" | "thinking"
+    /// Model that produced this message, as reported by the source log
+    /// (e.g. "claude-opus-5", "gpt-5.6-sol"). None for human turns and for
+    /// exports that don't record it.
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -30,6 +35,10 @@ pub struct ConversationSummary {
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
     pub message_count: i64,
+    /// Distinct models seen across this conversation's messages, in the order
+    /// they first appear. A session can switch models mid-way, so this is a
+    /// list rather than a single value. Empty for sources that don't report it.
+    pub models: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -40,6 +49,8 @@ pub struct MessageRow {
     pub text: String,
     pub created_at: Option<String>,
     pub seq: i64,
+    pub kind: String,
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -95,6 +106,14 @@ pub struct SearchHit {
     pub platform: String,
     pub updated_at: Option<String>,
     pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ModelRow {
+    /// Raw model id as recorded in the session log.
+    pub model: String,
+    /// Number of conversations that used it at least once.
+    pub conversation_count: i64,
 }
 
 #[derive(Debug, Serialize, Clone)]

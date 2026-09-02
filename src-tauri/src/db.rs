@@ -27,6 +27,7 @@ pub fn open(path: &PathBuf) -> rusqlite::Result<Connection> {
             created_at TEXT,
             updated_at TEXT,
             message_count INTEGER NOT NULL DEFAULT 0,
+            models TEXT NOT NULL DEFAULT '',
             content_hash TEXT NOT NULL DEFAULT '',
             imported_at TEXT NOT NULL,
             import_batch_id TEXT
@@ -38,7 +39,9 @@ pub fn open(path: &PathBuf) -> rusqlite::Result<Connection> {
             sender TEXT NOT NULL,
             text TEXT NOT NULL DEFAULT '',
             created_at TEXT,
-            seq INTEGER NOT NULL
+            seq INTEGER NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'text',
+            model TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
         CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at);
@@ -97,5 +100,35 @@ pub fn open(path: &PathBuf) -> rusqlite::Result<Connection> {
         );
         ",
     )?;
+
+    // Migrations for DBs created before a column existed:
+    //  - `messages.kind`  — agent sessions used to drop tool_use/tool_result/thinking entirely.
+    //  - `messages.model` / `conversations.models` — the model behind each turn.
+    // Rows written before the column existed keep the default until the source
+    // is re-imported; `content_hash` covers the model, so a re-scan refreshes them.
+    add_column_if_missing(&conn, "messages", "kind", "TEXT NOT NULL DEFAULT 'text'")?;
+    add_column_if_missing(&conn, "messages", "model", "TEXT")?;
+    add_column_if_missing(&conn, "conversations", "models", "TEXT NOT NULL DEFAULT ''")?;
+
     Ok(conn)
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    decl: &str,
+) -> rusqlite::Result<()> {
+    let exists = {
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let names: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))?
+            .filter_map(Result::ok)
+            .collect();
+        names.iter().any(|n| n == column)
+    };
+    if !exists {
+        conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"), [])?;
+    }
+    Ok(())
 }

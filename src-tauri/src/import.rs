@@ -122,6 +122,8 @@ fn parse_claude(arr: Vec<Value>) -> Vec<NormalizedConversation> {
                                 sender,
                                 text,
                                 created_at: mcreated,
+                                kind: "text".to_string(),
+                                model: None,
                             })
                         })
                         .collect()
@@ -343,6 +345,16 @@ fn parse_chatgpt(
                     }
                     let ts = message.get("create_time").and_then(|v| v.as_f64()).unwrap_or(0.0);
                     let sender = if role == "user" { "human" } else { "assistant" };
+                    // Assistant turns record which model answered them.
+                    let model = if sender == "assistant" {
+                        message
+                            .get("metadata")
+                            .and_then(|m| m.get("model_slug"))
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                    } else {
+                        None
+                    };
                     entries.push((
                         ts,
                         NormalizedMessage {
@@ -350,6 +362,8 @@ fn parse_chatgpt(
                             sender: sender.to_string(),
                             text,
                             created_at: unix_secs_to_iso(ts),
+                            kind: "text".to_string(),
+                            model,
                         },
                     ));
                 }
@@ -465,6 +479,8 @@ fn parse_deepseek(arr: Vec<Value>) -> Vec<NormalizedConversation> {
                                 sender: sender.to_string(),
                                 text,
                                 created_at: ts,
+                                kind: "text".to_string(),
+                                model: None,
                             });
                         }
                     }
@@ -502,8 +518,27 @@ fn content_hash(conv: &NormalizedConversation) -> String {
     for m in &conv.messages {
         hasher.update(m.id.as_bytes());
         hasher.update(m.text.as_bytes());
+        // Part of the hash so sessions stored before models were recorded are
+        // seen as changed on the next scan and get backfilled, instead of
+        // being skipped as unchanged forever.
+        hasher.update(m.model.as_deref().unwrap_or("").as_bytes());
     }
     format!("{:x}", hasher.finalize())
+}
+
+/// Distinct models used across a conversation, in first-appearance order.
+/// Stored comma-joined on `conversations.models` so the list view and the
+/// model filter don't have to scan the messages table.
+fn distinct_models(conv: &NormalizedConversation) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    for m in &conv.messages {
+        if let Some(model) = m.model.as_deref() {
+            if !model.is_empty() && !out.contains(&model) {
+                out.push(model);
+            }
+        }
+    }
+    out
 }
 
 /// Persist a batch of normalized conversations into an open transaction,
@@ -556,12 +591,13 @@ pub(crate) fn persist_conversations(
         }
 
         tx.execute(
-            "INSERT INTO conversations (id, platform, title, summary, url, created_at, updated_at, message_count, content_hash, imported_at, import_batch_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "INSERT INTO conversations (id, platform, title, summary, url, created_at, updated_at, message_count, models, content_hash, imported_at, import_batch_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(id) DO UPDATE SET
                 platform=excluded.platform, title=excluded.title, summary=excluded.summary,
                 url=excluded.url, created_at=excluded.created_at, updated_at=excluded.updated_at,
-                message_count=excluded.message_count, content_hash=excluded.content_hash,
+                message_count=excluded.message_count, models=excluded.models,
+                content_hash=excluded.content_hash,
                 imported_at=excluded.imported_at, import_batch_id=excluded.import_batch_id",
             params![
                 conv.id,
@@ -572,6 +608,7 @@ pub(crate) fn persist_conversations(
                 conv.created_at,
                 conv.updated_at,
                 conv.messages.len() as i64,
+                distinct_models(conv).join(","),
                 hash,
                 now,
                 batch_id
@@ -587,10 +624,10 @@ pub(crate) fn persist_conversations(
 
         for (seq, msg) in conv.messages.iter().enumerate() {
             tx.execute(
-                "INSERT INTO messages (id, conversation_id, sender, text, created_at, seq)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT(id) DO UPDATE SET text=excluded.text, sender=excluded.sender, created_at=excluded.created_at, seq=excluded.seq",
-                params![msg.id, conv.id, msg.sender, msg.text, msg.created_at, seq as i64],
+                "INSERT INTO messages (id, conversation_id, sender, text, created_at, seq, kind, model)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(id) DO UPDATE SET text=excluded.text, sender=excluded.sender, created_at=excluded.created_at, seq=excluded.seq, kind=excluded.kind, model=excluded.model",
+                params![msg.id, conv.id, msg.sender, msg.text, msg.created_at, seq as i64, msg.kind, msg.model],
             )
             .map_err(|e| e.to_string())?;
 
@@ -682,6 +719,8 @@ mod parser_version_tests {
                 sender: "assistant".to_string(),
                 text: text.to_string(),
                 created_at: Some("2026-01-01T00:00:00Z".to_string()),
+                kind: "text".to_string(),
+                model: None,
             }],
         }
     }
@@ -767,6 +806,76 @@ mod parser_version_tests {
             persist_conversations(&tx, &[conv(text)], "batch-2", "2026-01-02T00:00:00Z", None).unwrap();
         tx.commit().unwrap();
         assert_eq!((added, updated, skipped), (0, 0, 1));
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+}
+
+#[cfg(test)]
+mod model_persistence_tests {
+    use super::*;
+
+    fn msg(id: &str, sender: &str, model: Option<&str>) -> NormalizedMessage {
+        NormalizedMessage {
+            id: id.to_string(),
+            sender: sender.to_string(),
+            text: format!("text of {id}"),
+            created_at: Some("2026-01-01T00:00:00Z".to_string()),
+            kind: "text".to_string(),
+            model: model.map(String::from),
+        }
+    }
+
+    /// The per-message model lands on `messages.model`, and the conversation
+    /// row carries the distinct ones (first-appearance order, no repeats) so
+    /// the list view and model filter never touch the messages table.
+    #[test]
+    fn persist_stores_per_message_models_and_the_conversation_model_list() {
+        let db_path = std::env::temp_dir().join(format!("chatvault_test_models_{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&db_path);
+        let mut db_conn = crate::db::open(&db_path).unwrap();
+
+        let conv = NormalizedConversation {
+            id: "cc:models".to_string(),
+            platform: "claude-code".to_string(),
+            title: "Mixed session".to_string(),
+            summary: String::new(),
+            url: String::new(),
+            created_at: Some("2026-01-01T00:00:00Z".to_string()),
+            updated_at: Some("2026-01-01T00:00:00Z".to_string()),
+            messages: vec![
+                msg("m1", "human", None),
+                msg("m2", "assistant", Some("claude-sonnet-4-6")),
+                msg("m3", "assistant", Some("claude-opus-5")),
+                msg("m4", "assistant", Some("claude-sonnet-4-6")),
+            ],
+        };
+
+        let tx = db_conn.transaction().unwrap();
+        persist_conversations(&tx, &[conv], "batch-1", "2026-01-01T00:00:00Z", None).unwrap();
+        tx.commit().unwrap();
+
+        let models: String = db_conn
+            .query_row("SELECT models FROM conversations WHERE id = 'cc:models'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(models, "claude-sonnet-4-6,claude-opus-5");
+
+        let per_message: Vec<Option<String>> = db_conn
+            .prepare("SELECT model FROM messages WHERE conversation_id = 'cc:models' ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            per_message,
+            vec![
+                None,
+                Some("claude-sonnet-4-6".to_string()),
+                Some("claude-opus-5".to_string()),
+                Some("claude-sonnet-4-6".to_string()),
+            ]
+        );
 
         let _ = std::fs::remove_file(&db_path);
     }

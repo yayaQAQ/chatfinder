@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { X, TerminalSquare, Save } from "lucide-react";
+import { Select } from "./Select";
 import { api } from "../lib/api";
 import { useToast } from "../lib/toast";
 import { useI18n } from "../lib/i18n";
@@ -81,14 +82,15 @@ export function TerminalSettings({ onClose, onSaved }: Props) {
           {/* Terminal app */}
           <div>
             <label className={labelCls}>{t("terminalSettings.terminalLabel")}</label>
-            <select
+            <Select
               value={terminal}
-              onChange={(e) => setTerminal(e.target.value)}
-              className={inputCls}
-            >
-              <option value="terminal">{t("terminalSettings.terminalOptionDefault")}</option>
-              <option value="iterm2">{t("terminalSettings.terminalOptionIterm")}</option>
-            </select>
+              onChange={setTerminal}
+              className={`${inputCls} cursor-pointer`}
+              options={[
+                { value: "terminal", label: t("terminalSettings.terminalOptionDefault") },
+                { value: "iterm2", label: t("terminalSettings.terminalOptionIterm") },
+              ]}
+            />
           </div>
 
           {/* Proxy URL */}

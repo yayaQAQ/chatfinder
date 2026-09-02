@@ -9,6 +9,8 @@ export interface ConversationSummary {
   created_at: string | null;
   updated_at: string | null;
   message_count: number;
+  /** Distinct models used in this conversation, first-appearance order. */
+  models: string[];
 }
 
 export interface MessageRow {
@@ -18,6 +20,8 @@ export interface MessageRow {
   text: string;
   created_at: string | null;
   seq: number;
+  kind: string; // "text" | "tool_use" | "tool_result" | "thinking"
+  model: string | null; // model that produced this message (assistant turns only)
 }
 
 export interface TagRow {
@@ -79,6 +83,11 @@ export interface EmbeddingStats {
   model: string | null;
 }
 
+export interface ModelRow {
+  model: string;
+  conversation_count: number;
+}
+
 export interface EmbedConfig {
   apiUrl: string;
   model: string;
@@ -107,6 +116,8 @@ export interface StructuralFilter {
   dateTo?: string;
   minMessages?: number;
   maxMessages?: number;
+  /** Raw model id — matches conversations that used it at least once. */
+  model?: string;
   role?: RoleFilter;
 }
 
@@ -139,11 +150,13 @@ export const api = {
       dateTo: filter.dateTo ?? "",
       minMessages: filter.minMessages ?? 0,
       maxMessages: filter.maxMessages ?? 0,
+      modelFilter: filter.model ?? "",
       sort: filter.sort ?? "newest",
       limit,
       offset,
     }),
   countConversations: () => invoke<number>("count_conversations"),
+  listModels: () => invoke<ModelRow[]>("list_models"),
   getConversation: (id: string) =>
     invoke<[ConversationSummary, MessageRow[]]>("get_conversation", { id }),
   listConversationsByPath: (path: string) =>
@@ -161,6 +174,7 @@ export const api = {
       dateTo: filter.dateTo ?? "",
       minMessages: filter.minMessages ?? 0,
       maxMessages: filter.maxMessages ?? 0,
+      modelFilter: filter.model ?? "",
       role: filter.role ?? "",
     }),
   searchFavorites: (query: string) => invoke<FavoriteRow[]>("search_favorites", { query }),
@@ -212,6 +226,7 @@ export const api = {
       dateTo: filter.dateTo ?? "",
       minMessages: filter.minMessages ?? 0,
       maxMessages: filter.maxMessages ?? 0,
+      modelFilter: filter.model ?? "",
       role: filter.role ?? "",
     }),
   launchResumeTerminal: (command: string, cwd?: string) =>
