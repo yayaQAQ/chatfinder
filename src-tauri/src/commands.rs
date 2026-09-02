@@ -361,6 +361,29 @@ fn delete_conversation_dependents(tx: &rusqlite::Transaction, conversation_id: &
     Ok(())
 }
 
+/// Same cleanup as `delete_conversation_dependents`, for every conversation in
+/// an import batch — but set-based rather than one conversation at a time.
+/// `search_index` is an FTS5 table whose `conversation_id` is UNINDEXED, so a
+/// targeted delete scans the whole index; running that per conversation makes
+/// dropping a large batch quadratic. This clears the batch in one scan each.
+fn delete_batch_dependents(tx: &rusqlite::Transaction, batch_id: &str) -> Result<(), String> {
+    tx.execute(
+        "DELETE FROM embeddings WHERE message_id IN (
+             SELECT m.id FROM messages m
+             JOIN conversations c ON c.id = m.conversation_id
+             WHERE c.import_batch_id = ?1)",
+        params![batch_id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM search_index WHERE conversation_id IN (
+             SELECT id FROM conversations WHERE import_batch_id = ?1)",
+        params![batch_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn delete_conversation(state: State<DbState>, id: String) -> Result<(), String> {
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
@@ -416,9 +439,7 @@ pub fn delete_import_batch(state: State<DbState>, batch_id: String) -> Result<i6
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?
     };
 
-    for conv_id in &ids {
-        delete_conversation_dependents(&tx, conv_id)?;
-    }
+    delete_batch_dependents(&tx, &batch_id)?;
     tx.execute(
         "DELETE FROM conversations WHERE import_batch_id = ?1",
         params![batch_id],
@@ -1379,6 +1400,47 @@ mod delete_tests {
             (0, 0, 0, 0, 0),
             "conversation delete must clear messages/favorites (FK cascade) and search_index/embeddings (explicit)"
         );
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// The batch delete is set-based (one statement for the whole batch) rather
+    /// than a loop over `delete_conversation_dependents`, so it needs its own
+    /// guard: it must clear exactly the same tables, and only for the batch
+    /// being deleted.
+    #[test]
+    fn delete_batch_dependents_clears_the_batch_and_leaves_other_batches_alone() {
+        let db_path = std::env::temp_dir().join(format!("chatvault_test_delete_batch_{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&db_path);
+        let mut conn = crate::db::open(&db_path).unwrap();
+        seed(&conn);
+        conn.execute_batch(
+            "
+            INSERT INTO conversations (id, platform, title, imported_at, import_batch_id)
+                VALUES ('conv-9', 'claude', 'Other batch', '2026-01-01T00:00:00Z', 'batch-2');
+            INSERT INTO messages (id, conversation_id, sender, text, seq)
+                VALUES ('msg-9', 'conv-9', 'human', 'keep me', 0);
+            INSERT INTO search_index (ref_id, conversation_id, kind, text)
+                VALUES ('msg-9', 'conv-9', 'message', 'keep me');
+            INSERT INTO embeddings (message_id, model, vec) VALUES ('msg-9', 'test-model', x'01');
+            ",
+        )
+        .unwrap();
+
+        let tx = conn.transaction().unwrap();
+        delete_batch_dependents(&tx, "batch-1").unwrap();
+        tx.execute("DELETE FROM conversations WHERE import_batch_id = 'batch-1'", []).unwrap();
+        tx.commit().unwrap();
+
+        assert_eq!(
+            counts(&conn),
+            (1, 1, 0, 1, 1),
+            "only batch-2's conversation/message/search row/embedding may survive"
+        );
+        let surviving: String = conn
+            .query_row("SELECT id FROM conversations", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(surviving, "conv-9");
 
         let _ = std::fs::remove_file(&db_path);
     }

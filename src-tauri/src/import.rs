@@ -555,42 +555,76 @@ pub(crate) fn persist_conversations(
     let mut updated = 0i64;
     let mut skipped = 0i64;
 
-    let mut existing_hash_stmt = tx
-        .prepare("SELECT content_hash FROM conversations WHERE id = ?1")
+    // Pass 1 — classify. Hashing and the existence lookup are cheap; doing them
+    // up front means the rows that need clearing are known as one set, which is
+    // what makes the bulk delete below possible.
+    let mut pending: Vec<(&NormalizedConversation, String)> = Vec::new();
+    let mut stale_ids: Vec<&str> = Vec::new();
+    {
+        let mut existing_hash_stmt = tx
+            .prepare("SELECT content_hash FROM conversations WHERE id = ?1")
+            .map_err(|e| e.to_string())?;
+
+        for conv in conversations {
+            let hash = content_hash(conv);
+            let existing: Option<String> = existing_hash_stmt
+                .query_row(params![conv.id], |row| row.get(0))
+                .ok();
+            match existing {
+                Some(old_hash) if old_hash == hash => {
+                    skipped += 1;
+                    continue;
+                }
+                Some(_) => {
+                    stale_ids.push(&conv.id);
+                    updated += 1;
+                }
+                None => added += 1,
+            }
+            pending.push((conv, hash));
+        }
+    }
+
+    // Pass 2 — clear the old rows of every changed conversation in one go.
+    //
+    // This has to be a single statement rather than one per conversation:
+    // `search_index` is an FTS5 table whose `conversation_id` is UNINDEXED, so
+    // every `DELETE ... WHERE conversation_id = ?` scans the whole index. Once
+    // per conversation that is quadratic — re-importing a 1.7k-conversation
+    // export spent almost all of its time there. One scan covers them all.
+    if !stale_ids.is_empty() {
+        tx.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS stale_conversations (id TEXT PRIMARY KEY);
+             DELETE FROM stale_conversations;",
+        )
         .map_err(|e| e.to_string())?;
-
-    for (idx, conv) in conversations.iter().enumerate() {
-        if let Some(cb) = on_progress {
-            if idx % 5 == 0 || idx + 1 == conversations.len() {
-                cb(idx + 1, conversations.len());
-            }
-        }
-        let hash = content_hash(conv);
-        let existing: Option<String> = existing_hash_stmt
-            .query_row(params![conv.id], |row| row.get(0))
-            .ok();
-
-        match existing {
-            Some(old_hash) if old_hash == hash => {
-                skipped += 1;
-                continue;
-            }
-            Some(_) => {
-                tx.execute("DELETE FROM messages WHERE conversation_id = ?1", params![conv.id])
-                    .map_err(|e| e.to_string())?;
-                tx.execute(
-                    "DELETE FROM search_index WHERE conversation_id = ?1",
-                    params![conv.id],
-                )
+        {
+            let mut ins = tx
+                .prepare("INSERT OR IGNORE INTO stale_conversations (id) VALUES (?1)")
                 .map_err(|e| e.to_string())?;
-                updated += 1;
-            }
-            None => {
-                added += 1;
+            for id in &stale_ids {
+                ins.execute(params![id]).map_err(|e| e.to_string())?;
             }
         }
-
         tx.execute(
+            "DELETE FROM messages WHERE conversation_id IN (SELECT id FROM stale_conversations)",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM search_index WHERE conversation_id IN (SELECT id FROM stale_conversations)",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute_batch("DELETE FROM stale_conversations;")
+            .map_err(|e| e.to_string())?;
+    }
+
+    // Pass 3 — write. Statements are prepared once and reused; `tx.execute(sql, ..)`
+    // re-parses the SQL on every call, which is measurable when it runs once per
+    // message across tens of thousands of them.
+    let mut conv_stmt = tx
+        .prepare(
             "INSERT INTO conversations (id, platform, title, summary, url, created_at, updated_at, message_count, models, content_hash, imported_at, import_batch_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(id) DO UPDATE SET
@@ -599,7 +633,29 @@ pub(crate) fn persist_conversations(
                 message_count=excluded.message_count, models=excluded.models,
                 content_hash=excluded.content_hash,
                 imported_at=excluded.imported_at, import_batch_id=excluded.import_batch_id",
-            params![
+        )
+        .map_err(|e| e.to_string())?;
+    let mut msg_stmt = tx
+        .prepare(
+            "INSERT INTO messages (id, conversation_id, sender, text, created_at, seq, kind, model)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET text=excluded.text, sender=excluded.sender, created_at=excluded.created_at, seq=excluded.seq, kind=excluded.kind, model=excluded.model",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut fts_stmt = tx
+        .prepare("INSERT INTO search_index (ref_id, conversation_id, kind, text) VALUES (?1, ?2, ?3, ?4)")
+        .map_err(|e| e.to_string())?;
+
+    let total = pending.len();
+    for (idx, (conv, hash)) in pending.iter().enumerate() {
+        if let Some(cb) = on_progress {
+            if idx % 5 == 0 || idx + 1 == total {
+                cb(idx + 1, total);
+            }
+        }
+
+        conv_stmt
+            .execute(params![
                 conv.id,
                 conv.platform,
                 conv.title,
@@ -612,31 +668,36 @@ pub(crate) fn persist_conversations(
                 hash,
                 now,
                 batch_id
-            ],
-        )
-        .map_err(|e| e.to_string())?;
+            ])
+            .map_err(|e| e.to_string())?;
 
-        tx.execute(
-            "INSERT INTO search_index (ref_id, conversation_id, kind, text) VALUES (?1, ?2, 'title', ?3)",
-            params![conv.id, conv.id, format!("{} {}", conv.title, conv.summary)],
-        )
-        .map_err(|e| e.to_string())?;
+        fts_stmt
+            .execute(params![
+                conv.id,
+                conv.id,
+                "title",
+                format!("{} {}", conv.title, conv.summary)
+            ])
+            .map_err(|e| e.to_string())?;
 
         for (seq, msg) in conv.messages.iter().enumerate() {
-            tx.execute(
-                "INSERT INTO messages (id, conversation_id, sender, text, created_at, seq, kind, model)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT(id) DO UPDATE SET text=excluded.text, sender=excluded.sender, created_at=excluded.created_at, seq=excluded.seq, kind=excluded.kind, model=excluded.model",
-                params![msg.id, conv.id, msg.sender, msg.text, msg.created_at, seq as i64, msg.kind, msg.model],
-            )
-            .map_err(|e| e.to_string())?;
+            msg_stmt
+                .execute(params![
+                    msg.id,
+                    conv.id,
+                    msg.sender,
+                    msg.text,
+                    msg.created_at,
+                    seq as i64,
+                    msg.kind,
+                    msg.model
+                ])
+                .map_err(|e| e.to_string())?;
 
             let fts_text = strip_data_uris_for_fts(&msg.text);
-            tx.execute(
-                "INSERT INTO search_index (ref_id, conversation_id, kind, text) VALUES (?1, ?2, 'message', ?3)",
-                params![msg.id, conv.id, fts_text.as_ref()],
-            )
-            .map_err(|e| e.to_string())?;
+            fts_stmt
+                .execute(params![msg.id, conv.id, "message", fts_text.as_ref()])
+                .map_err(|e| e.to_string())?;
         }
     }
 
