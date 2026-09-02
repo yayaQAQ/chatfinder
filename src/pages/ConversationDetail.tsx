@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { writeText as clipboardWrite } from "@tauri-apps/plugin-clipboard-manager";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ArrowLeft, ExternalLink, Star, MessageSquare, Copy, Check, PanelRightClose, PanelRight,
-  Search, ChevronUp, ChevronDown, X, Trash2, FolderOpen,
+  Search, ChevronUp, ChevronDown, X, Trash2, FolderOpen, Settings,
 } from "lucide-react";
 import { api, type ConversationSummary, type MessageRow } from "../lib/api";
 import { FavoriteModal } from "../components/FavoriteModal";
 import { MessageBubble } from "../components/MessageBubble";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PathConversationsDialog } from "../components/PathConversationsDialog";
+import { TerminalSettings } from "../components/TerminalSettings";
 import { selectionToMarkdown } from "../lib/markdown";
 import { useI18n, formatLongDate } from "../lib/i18n";
 import { useToast } from "../lib/toast";
@@ -52,7 +53,27 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
   const containerRef = useRef<HTMLDivElement>(null);
   const [resuming, setResuming] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [terminalSettingsOpen, setTerminalSettingsOpen] = useState(false);
+  const [resumeSettings, setResumeSettings] = useState({ proxy: "", claudeArgs: "", codexArgs: "" });
   const humanMessages = messages.filter((m) => m.sender === "human");
+
+  // Proxy + extra args for the "resume in terminal" command (terminal app choice
+  // is read server-side). Re-loaded after the TerminalSettings dialog saves.
+  const loadResumeSettings = useCallback(() => {
+    Promise.all([
+      api.getSetting("resume_proxy"),
+      api.getSetting("claude_code_args"),
+      api.getSetting("codex_args"),
+    ])
+      .then(([proxy, claudeArgs, codexArgs]) =>
+        setResumeSettings({ proxy: proxy ?? "", claudeArgs: claudeArgs ?? "", codexArgs: codexArgs ?? "" }),
+      )
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadResumeSettings();
+  }, [loadResumeSettings]);
 
   // In-conversation search: client-side, scoped to the messages already
   // loaded for this conversation — not the global keyword/semantic search.
@@ -107,13 +128,23 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
 
   const resumeCommand = (() => {
     if (!conv) return null;
+    const { proxy, claudeArgs, codexArgs } = resumeSettings;
+    const proxyPrefix = proxy ? `HTTPS_PROXY=${proxy} HTTP_PROXY=${proxy} ALL_PROXY=${proxy} ` : "";
     if (conv.platform === "claude-code") {
       const sessionId = conv.id.startsWith("cc:") ? conv.id.slice(3) : conv.id;
-      return { cmd: `claude --resume ${sessionId}`, cwd: conv.summary || undefined };
+      const extra = claudeArgs.trim();
+      return {
+        cmd: `${proxyPrefix}claude --resume ${sessionId}${extra ? ` ${extra}` : ""}`,
+        cwd: conv.summary || undefined,
+      };
     }
     if (conv.platform === "codex") {
       const sessionId = conv.id.startsWith("codex:") ? conv.id.slice(6) : conv.id;
-      return { cmd: `codex resume ${sessionId}`, cwd: conv.summary || undefined };
+      const extra = codexArgs.trim();
+      return {
+        cmd: `${proxyPrefix}codex resume ${sessionId}${extra ? ` ${extra}` : ""}`,
+        cwd: conv.summary || undefined,
+      };
     }
     return null;
   })();
@@ -294,15 +325,24 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
             <Search size={15} />
           </button>
           {resumeCommand && (
-            <button
-              onClick={handleResume}
-              disabled={resuming}
-              title={resumeCommand.cmd}
-              className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-600 transition-colors hover:bg-stone-50 hover:text-stone-800 disabled:opacity-50"
-            >
-              <ExternalLink size={13} />
-              {resuming ? t("conversationDetail.resumeLaunching") : t("conversationDetail.resumeConversation")}
-            </button>
+            <>
+              <button
+                onClick={handleResume}
+                disabled={resuming}
+                title={resumeCommand.cmd}
+                className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-600 transition-colors hover:bg-stone-50 hover:text-stone-800 disabled:opacity-50"
+              >
+                <ExternalLink size={13} />
+                {resuming ? t("conversationDetail.resumeLaunching") : t("conversationDetail.resumeConversation")}
+              </button>
+              <button
+                onClick={() => setTerminalSettingsOpen(true)}
+                title={t("terminalSettings.title")}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-400 transition-colors hover:bg-stone-50 hover:text-stone-700"
+              >
+                <Settings size={14} />
+              </button>
+            </>
           )}
           {conv.url && !resumeCommand && (
             <button
@@ -495,6 +535,13 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
           path={conv.summary}
           currentId={conv.id}
           onClose={() => setPathDialogOpen(false)}
+        />
+      )}
+
+      {terminalSettingsOpen && (
+        <TerminalSettings
+          onClose={() => setTerminalSettingsOpen(false)}
+          onSaved={loadResumeSettings}
         />
       )}
     </div>
