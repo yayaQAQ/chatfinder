@@ -26,14 +26,6 @@ pub struct ImportProgress {
 // delivered — visibly reordering the stream (progress jumps to ~100% then
 // drops back down). Channel::send() writes straight to the webview with no
 // shared lock, so ordering is guaranteed.
-/// Whether the user's system region is mainland China. The frontend uses this
-/// to hide ChatGPT/OpenAI surfaces (and the backend refuses ChatGPT imports) so
-/// the app complies with Guideline 5 on the China storefront.
-#[tauri::command]
-pub fn is_china_region() -> bool {
-    crate::region::is_china_region()
-}
-
 #[tauri::command]
 pub async fn import_zip_file(
     app: tauri::AppHandle,

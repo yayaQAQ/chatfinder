@@ -15,7 +15,6 @@ import { TerminalSettings } from "../components/TerminalSettings";
 import { selectionToMarkdown } from "../lib/markdown";
 import { useI18n, formatLongDate } from "../lib/i18n";
 import { useToast } from "../lib/toast";
-import { useRegion } from "../lib/region";
 import { platformLabel } from "../lib/platforms";
 
 function stripForPreview(text: string, imagePlaceholder: string): string {
@@ -34,7 +33,6 @@ function stripForPreview(text: string, imagePlaceholder: string): string {
 
 export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => void } = {}) {
   const { t, lang } = useI18n();
-  const { isChina } = useRegion();
   const { push } = useToast();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -256,7 +254,7 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
     return <div className="flex h-full items-center justify-center text-sm text-stone-400">{t("conversationDetail.notFound")}</div>;
   }
 
-  const platformLabelText = platformLabel(conv.platform, isChina);
+  const platformLabelText = platformLabel(conv.platform);
   const platformColor =
     conv.platform === "claude"
       ? "from-orange-400 to-rose-500"

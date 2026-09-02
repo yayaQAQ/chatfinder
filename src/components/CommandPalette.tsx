@@ -5,7 +5,6 @@ import { api, type ConversationSummary, type SearchHit, type FavoriteRow, type E
 import { FtsSnippet, QuerySnippet } from "../lib/highlight";
 import { getRecentSearches, addRecentSearch, removeRecentSearch } from "../lib/searchHistory";
 import { useI18n, formatCompactRelativeDate } from "../lib/i18n";
-import { useRegion } from "../lib/region";
 import { platformLabel } from "../lib/platforms";
 
 interface Props {
@@ -29,7 +28,6 @@ type Item =
 
 export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
   const { t, lang } = useI18n();
-  const { isChina } = useRegion();
   const [query, setQuery] = useState("");
   const [recent, setRecent] = useState<ConversationSummary[]>([]);
   const [hits, setHits]       = useState<SearchHit[]>([]);
@@ -263,7 +261,7 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
               return (
                 <button key={c.id} data-idx={i} onClick={() => open(item)} onMouseEnter={() => setActive(i)} className={base}>
                   <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${platformBadge[c.platform] ?? "bg-stone-100 text-stone-500"}`}>
-                    {platformLabel(c.platform, isChina)}
+                    {platformLabel(c.platform)}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-stone-800">{c.title || t("common.untitledConversation")}</div>
@@ -313,7 +311,7 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
               <button key={h.ref_id} data-idx={i} onClick={() => open(item)} onMouseEnter={() => setActive(i)} className={base}>
                 <div className="mt-0.5 shrink-0 flex flex-col items-center gap-1">
                   <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${platformBadge[h.platform] ?? "bg-stone-100 text-stone-500"}`}>
-                    {platformLabel(h.platform, isChina)}
+                    {platformLabel(h.platform)}
                   </span>
                   {sim !== null
                     ? <BrainCircuit size={11} className="text-violet-400" />

@@ -4,7 +4,6 @@ import { X, BrainCircuit, Plug, Cpu, KeyRound, PlayCircle, CheckCircle2, AlertCi
 import { api, type EmbeddingStats } from "../lib/api";
 import { useToast } from "../lib/toast";
 import { useI18n, type TranslationKey } from "../lib/i18n";
-import { useRegion } from "../lib/region";
 
 interface Props {
   onClose: () => void;
@@ -13,15 +12,13 @@ interface Props {
 
 interface Progress { current: number; total: number; }
 
-const PRESETS: { labelKey?: TranslationKey; label?: string; url: string; model: string; hiddenInChina?: boolean }[] = [
+const PRESETS: { labelKey?: TranslationKey; label?: string; url: string; model: string }[] = [
   { labelKey: "embedSettings.presetOllama", url: "http://127.0.0.1:11434", model: "nomic-embed-text" },
-  { label: "OpenAI", url: "https://api.openai.com", model: "text-embedding-3-small", hiddenInChina: true },
   { label: "Jina AI", url: "https://api.jina.ai", model: "jina-embeddings-v3" },
 ];
 
 export function EmbedSettings({ onClose, onStatsChange }: Props) {
   const { t } = useI18n();
-  const { isChina } = useRegion();
   const [apiUrl, setApiUrl] = useState("http://127.0.0.1:11434");
   const [model, setModel] = useState("nomic-embed-text");
   const [apiKey, setApiKey] = useState("");
@@ -141,7 +138,7 @@ export function EmbedSettings({ onClose, onStatsChange }: Props) {
           <div>
             <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-stone-400">{t("embedSettings.quickConfig")}</label>
             <div className="flex gap-2">
-              {PRESETS.filter((p) => !(isChina && p.hiddenInChina)).map((p) => (
+              {PRESETS.map((p) => (
                 <button
                   key={p.url}
                   onClick={() => applyPreset(p)}

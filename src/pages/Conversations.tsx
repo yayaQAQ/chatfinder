@@ -11,7 +11,6 @@ import { getRecentSearches, addRecentSearch, removeRecentSearch } from "../lib/s
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../lib/toast";
 import { useI18n, formatRelativeDate, type TranslationKey } from "../lib/i18n";
-import { useRegion } from "../lib/region";
 import { platformLabel } from "../lib/platforms";
 
 const PAGE_SIZE = 60;
@@ -46,7 +45,6 @@ export function Conversations({
   onDataChanged?: () => void;
 }) {
   const { t, lang } = useI18n();
-  const { isChina } = useRegion();
   const { push } = useToast();
   const [pendingDelete, setPendingDelete] = useState<ConversationSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -204,7 +202,7 @@ export function Conversations({
 
   // Build human-readable active filter chips
   const activeFilters: ActiveFilter[] = [];
-  if (platform)   activeFilters.push({ label: platformLabel(platform, isChina), clear: () => setPlatform("") });
+  if (platform)   activeFilters.push({ label: platformLabel(platform), clear: () => setPlatform("") });
   if (dateFrom)   activeFilters.push({ label: t("conversations.fromPrefix", { date: dateFrom }), clear: () => setDateFrom("") });
   if (dateTo)     activeFilters.push({ label: t("conversations.toPrefix", { date: dateTo }), clear: () => setDateTo("") });
   if (minMsg)     activeFilters.push({ label: t("conversations.minMessagesChip", { n: minMsg }), clear: () => setMinMsg("") });
@@ -348,7 +346,7 @@ export function Conversations({
                     : "border-stone-200 bg-white text-stone-600 hover:bg-stone-100"
                 }`}
               >
-                {p === "" ? t("conversations.allPlatforms") : platformLabel(p, isChina)}
+                {p === "" ? t("conversations.allPlatforms") : platformLabel(p)}
               </button>
             ))}
             {!hasQuery && (
@@ -531,7 +529,7 @@ export function Conversations({
                       >
                         <div className="mb-2 flex items-center gap-2">
                           <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${platformBadge[h.platform] ?? "bg-stone-100 text-stone-600 border-stone-200"}`}>
-                            {platformLabel(h.platform, isChina)}
+                            {platformLabel(h.platform)}
                           </span>
                           {sim !== null ? (
                             <FileText size={11} className="text-violet-400" />
@@ -630,7 +628,7 @@ export function Conversations({
                   >
                     <div className="mb-2.5 flex items-center gap-2">
                       <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${platformBadge[c.platform] ?? "bg-stone-100 text-stone-600 border-stone-200"}`}>
-                        {platformLabel(c.platform, isChina)}
+                        {platformLabel(c.platform)}
                       </span>
                       <span className="ml-auto text-xs text-stone-400">{formatRelativeDate(c.updated_at ?? c.created_at, lang, t)}</span>
                       <button

@@ -4,7 +4,6 @@ import { X, FolderOpen, Loader2, MessageSquare, Search, FileText, Heading } from
 import { api, type ConversationSummary, type SearchHit } from "../lib/api";
 import { FtsSnippet } from "../lib/highlight";
 import { useI18n, formatRelativeDate } from "../lib/i18n";
-import { useRegion } from "../lib/region";
 import { platformLabel } from "../lib/platforms";
 
 const platformColor: Record<string, string> = {
@@ -28,7 +27,6 @@ export function PathConversationsDialog({
   const [hits, setHits] = useState<SearchHit[]>([]);
   const navigate = useNavigate();
   const { t, lang } = useI18n();
-  const { isChina } = useRegion();
 
   useEffect(() => {
     api.listConversationsByPath(path).then(setItems).finally(() => setLoading(false));
@@ -117,7 +115,7 @@ export function PathConversationsDialog({
                           platformColor[h.platform] ?? "from-stone-400 to-stone-600"
                         }`}
                       >
-                        {platformLabel(h.platform, isChina)[0]}
+                        {platformLabel(h.platform)[0]}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
@@ -164,14 +162,14 @@ export function PathConversationsDialog({
                         platformColor[c.platform] ?? "from-stone-400 to-stone-600"
                       }`}
                     >
-                      {platformLabel(c.platform, isChina)[0]}
+                      {platformLabel(c.platform)[0]}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-stone-700">
                         {c.title || t("common.untitledConversation")}
                       </p>
                       <div className="flex items-center gap-1.5 text-xs text-stone-400">
-                        <span>{platformLabel(c.platform, isChina)}</span>
+                        <span>{platformLabel(c.platform)}</span>
                         <span>·</span>
                         <MessageSquare size={10} />
                         <span>{t("common.messageCount", { n: c.message_count })}</span>

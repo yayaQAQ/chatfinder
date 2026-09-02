@@ -4,7 +4,6 @@ import { X, UploadCloud, CheckCircle2, FileArchive } from "lucide-react";
 import { api, type ImportSummary, type ImportProgress as Progress } from "../lib/api";
 import { useToast } from "../lib/toast";
 import { useI18n } from "../lib/i18n";
-import { useRegion } from "../lib/region";
 import { platformLabel } from "../lib/platforms";
 
 interface Props {
@@ -22,7 +21,6 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const { push } = useToast();
   const { t } = useI18n();
-  const { isChina } = useRegion();
 
   const runImport = async (path: string) => {
     setBusy(true);
@@ -49,7 +47,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
     const file = await open({
       multiple: false,
       filters: [{ name: t("importDialog.filePickerFilterName"), extensions: ["zip"] }],
-      title: t(isChina ? "importDialog.filePickerTitleChina" : "importDialog.filePickerTitle"),
+      title: t("importDialog.filePickerTitle"),
     });
     if (!file) return;
     await runImport(file as string);
@@ -60,7 +58,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
     ? Math.round((progress!.current / progress!.total) * 100)
     : null;
 
-  const platformLabelText = platformLabel(summary?.platform ?? "", isChina);
+  const platformLabelText = platformLabel(summary?.platform ?? "");
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-sm">
@@ -74,7 +72,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
             </div>
             <div>
               <h2 className="font-semibold text-stone-800">{t("importDialog.title")}</h2>
-              <p className="text-xs text-stone-400">{isChina ? "Claude · AI 对话 · DeepSeek" : "Claude · ChatGPT · DeepSeek"}</p>
+              <p className="text-xs text-stone-400">Claude · AI 对话 · DeepSeek</p>
             </div>
           </div>
           {!busy && (
@@ -104,7 +102,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
                 </div>
               </button>
               <p className="mt-3 text-center text-xs text-stone-400">
-                {t(isChina ? "importDialog.autoDetectHintChina" : "importDialog.autoDetectHint")}
+                {t("importDialog.autoDetectHint")}
               </p>
             </>
           )}
