@@ -4,6 +4,7 @@ import { X, BrainCircuit, Plug, Cpu, KeyRound, PlayCircle, CheckCircle2, AlertCi
 import { api, type EmbeddingStats } from "../lib/api";
 import { useToast } from "../lib/toast";
 import { useI18n, type TranslationKey } from "../lib/i18n";
+import { APP_STORE_BUILD } from "../lib/brand";
 
 interface Props {
   onClose: () => void;
@@ -14,6 +15,10 @@ interface Progress { current: number; total: number; }
 
 const PRESETS: { labelKey?: TranslationKey; label?: string; url: string; model: string }[] = [
   { labelKey: "embedSettings.presetOllama", url: "http://127.0.0.1:11434", model: "nomic-embed-text" },
+  // Named third-party providers are omitted from the App Store build (brand.ts).
+  ...(APP_STORE_BUILD
+    ? []
+    : [{ label: "OpenAI", url: "https://api.openai.com", model: "text-embedding-3-small" }]),
   { label: "Jina AI", url: "https://api.jina.ai", model: "jina-embeddings-v3" },
 ];
 

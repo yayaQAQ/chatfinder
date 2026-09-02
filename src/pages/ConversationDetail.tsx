@@ -287,7 +287,7 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
     return <div className="flex h-full items-center justify-center text-sm text-stone-400">{t("conversationDetail.notFound")}</div>;
   }
 
-  const platformLabelText = platformLabel(conv.platform);
+  const platformLabelText = platformLabel(conv.platform, lang);
   const platformColor =
     conv.platform === "claude"
       ? "from-orange-400 to-rose-500"

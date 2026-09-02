@@ -1,4 +1,7 @@
 import type { zh } from "./zh";
+import { APP_STORE_BUILD } from "../lib/brand";
+
+const CHATGPT = APP_STORE_BUILD ? "AI chat" : "ChatGPT";
 
 export const en: typeof zh = {
   common: {
@@ -20,7 +23,7 @@ export const en: typeof zh = {
   },
   app: {
     dropZipTitle: "Drop to import conversations",
-    dropZipSubtitle: "Auto-detects Claude / AI chat / DeepSeek format",
+    dropZipSubtitle: `Auto-detects Claude / ${CHATGPT} / DeepSeek format`,
     dropJsonTitle: "Drop to open JSON",
     dropJsonSubtitle: "Open in the JSON viewer",
     dropUnknownTitle: "Unsupported file format",
@@ -210,7 +213,7 @@ export const en: typeof zh = {
     title: "Import Conversation History",
     clickToSelect: "Click to select a ZIP file",
     orDrag: "or drag a file into the app window",
-    autoDetectHint: "Auto-detects Claude · AI chat · DeepSeek format · Incremental import · Skips duplicates",
+    autoDetectHint: `Auto-detects Claude · ${CHATGPT} · DeepSeek format · Incremental import · Skips duplicates`,
     preparing: "Preparing…",
     parsing: "Parsing file contents…",
     writingDb: "Writing to database",
@@ -223,7 +226,7 @@ export const en: typeof zh = {
     updated: "Updated",
     skipped: "Skipped",
     done: "Done",
-    filePickerTitle: "Select a Claude / AI chat / DeepSeek export zip file",
+    filePickerTitle: `Select a Claude / ${CHATGPT} / DeepSeek export zip file`,
     filePickerFilterName: "Export archive",
     importFailedToast: "Import failed: {{error}}",
     dbCount: "{{current}} / {{total}}",

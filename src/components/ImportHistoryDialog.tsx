@@ -87,7 +87,7 @@ export function ImportHistoryDialog({ onClose, onDeleted }: { onClose: () => voi
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-medium text-stone-600">
-                      {platformLabel(b.platform)}
+                      {platformLabel(b.platform, lang)}
                     </span>
                     <span className="text-xs text-stone-400">{formatLongDate(b.imported_at, lang)}</span>
                   </div>

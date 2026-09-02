@@ -1,3 +1,9 @@
+import { APP_STORE_BUILD } from "../lib/brand";
+
+// The App Store build shows a neutral name instead of the ChatGPT brand
+// (see brand.ts); everything else in the copy is identical.
+const CHATGPT = APP_STORE_BUILD ? "AI 对话" : "ChatGPT";
+
 export const zh = {
   common: {
     cancel: "取消",
@@ -18,7 +24,7 @@ export const zh = {
   },
   app: {
     dropZipTitle: "松手导入对话",
-    dropZipSubtitle: "自动识别 Claude / AI 对话 / DeepSeek 格式",
+    dropZipSubtitle: `自动识别 Claude / ${CHATGPT} / DeepSeek 格式`,
     dropJsonTitle: "松手打开 JSON",
     dropJsonSubtitle: "在 JSON 查看器中打开",
     dropUnknownTitle: "不支持此文件格式",
@@ -208,7 +214,7 @@ export const zh = {
     title: "导入对话历史",
     clickToSelect: "点击选择 ZIP 文件",
     orDrag: "或将文件拖入应用窗口",
-    autoDetectHint: "自动识别 Claude · AI 对话 · DeepSeek 格式 · 增量导入 · 跳过重复",
+    autoDetectHint: `自动识别 Claude · ${CHATGPT} · DeepSeek 格式 · 增量导入 · 跳过重复`,
     preparing: "准备中…",
     parsing: "解析文件内容…",
     writingDb: "写入数据库",
@@ -221,7 +227,7 @@ export const zh = {
     updated: "更新",
     skipped: "跳过",
     done: "完成",
-    filePickerTitle: "选择 Claude / AI 对话 / DeepSeek 导出的 zip 文件",
+    filePickerTitle: `选择 Claude / ${CHATGPT} / DeepSeek 导出的 zip 文件`,
     filePickerFilterName: "导出压缩包",
     importFailedToast: "导入失败：{{error}}",
     dbCount: "{{current}} / {{total}} 条",

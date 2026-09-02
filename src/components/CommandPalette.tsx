@@ -261,7 +261,7 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
               return (
                 <button key={c.id} data-idx={i} onClick={() => open(item)} onMouseEnter={() => setActive(i)} className={base}>
                   <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${platformBadge[c.platform] ?? "bg-stone-100 text-stone-500"}`}>
-                    {platformLabel(c.platform)}
+                    {platformLabel(c.platform, lang)}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-stone-800">{c.title || t("common.untitledConversation")}</div>
@@ -311,7 +311,7 @@ export function CommandPalette({ onClose, embedIndexed = 0 }: Props) {
               <button key={h.ref_id} data-idx={i} onClick={() => open(item)} onMouseEnter={() => setActive(i)} className={base}>
                 <div className="mt-0.5 shrink-0 flex flex-col items-center gap-1">
                   <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${platformBadge[h.platform] ?? "bg-stone-100 text-stone-500"}`}>
-                    {platformLabel(h.platform)}
+                    {platformLabel(h.platform, lang)}
                   </span>
                   {sim !== null
                     ? <BrainCircuit size={11} className="text-violet-400" />

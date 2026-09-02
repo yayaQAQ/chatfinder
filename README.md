@@ -4,6 +4,13 @@
 
 A cross-platform desktop app (Tauri + React) for importing, browsing, and searching your AI chat history from **Claude**, **ChatGPT**, **DeepSeek**, and local coding agents (**Claude Code**, **Codex CLI**) — all stored locally in a single SQLite database.
 
+## Links
+
+- **Mac App Store** → [Download ChatFinder](https://apps.apple.com/app/chatfinder/id6796240541)
+- **Website** → [chatfinder.newapiratio.com](https://chatfinder.newapiratio.com/)
+- **Support & FAQ** → [chatfinder.newapiratio.com/support](https://chatfinder.newapiratio.com/support/)
+- **Privacy Policy** → [chatfinder.newapiratio.com/privacy](https://chatfinder.newapiratio.com/privacy/)
+
 ## Features
 
 - **Multi-source import** — drop in an official export ZIP and it auto-detects the platform:
@@ -54,6 +61,18 @@ To build a release binary:
 
 ```bash
 npm run tauri build
+```
+
+### Build variants
+
+The Mac App Store build cannot carry the ChatGPT brand (App Store Review
+Guideline 5), so it shows a neutral "AI chat" name and omits the OpenAI
+embedding preset. It is the same code behind a build-time flag — see
+`src/lib/brand.ts` — not a separate branch:
+
+```bash
+npm run tauri build                # public build
+npm run tauri:build:appstore       # App Store build (VITE_APP_STORE=1)
 ```
 
 ## Usage

@@ -20,7 +20,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
   );
   const [progress, setProgress] = useState<Progress | null>(null);
   const { push } = useToast();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
 
   const runImport = async (path: string) => {
     setBusy(true);
@@ -58,7 +58,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
     ? Math.round((progress!.current / progress!.total) * 100)
     : null;
 
-  const platformLabelText = platformLabel(summary?.platform ?? "");
+  const platformLabelText = platformLabel(summary?.platform ?? "", lang);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-sm">
@@ -72,7 +72,7 @@ export function ImportDialog({ onClose, onImported, preloadedPath }: Props) {
             </div>
             <div>
               <h2 className="font-semibold text-stone-800">{t("importDialog.title")}</h2>
-              <p className="text-xs text-stone-400">Claude · AI 对话 · DeepSeek</p>
+              <p className="text-xs text-stone-400">{`Claude · ${platformLabel("chatgpt", lang)} · DeepSeek`}</p>
             </div>
           </div>
           {!busy && (

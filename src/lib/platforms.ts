@@ -1,15 +1,24 @@
 // Canonical platform display names. `platformLabel` is the single place that
-// decides how a platform renders. This App Store build suppresses the ChatGPT
-// brand name (Guideline 5), so it is relabeled to a neutral "AI 对话" here.
-const RAW_LABELS: Record<string, string> = {
+// decides how a platform renders.
+import { APP_STORE_BUILD } from "./brand";
+import type { Lang } from "./i18n";
+
+const LABELS: Record<string, string> = {
   claude: "Claude",
-  chatgpt: "AI 对话",
   deepseek: "DeepSeek",
   "claude-code": "Claude Code",
   codex: "Codex",
   agent: "Claude Code + Codex",
 };
 
-export function platformLabel(platform: string): string {
-  return RAW_LABELS[platform] ?? platform;
+// Kept out of LABELS and behind the build flag so the App Store bundle doesn't
+// carry the brand name at all — the unused branch is folded away at build time
+// (see brand.ts).
+const CHATGPT_LABEL: Record<Lang, string> = APP_STORE_BUILD
+  ? { zh: "AI 对话", en: "AI chat" }
+  : { zh: "ChatGPT", en: "ChatGPT" };
+
+export function platformLabel(platform: string, lang: Lang = "zh"): string {
+  if (platform === "chatgpt") return CHATGPT_LABEL[lang] ?? CHATGPT_LABEL.zh;
+  return LABELS[platform] ?? platform;
 }

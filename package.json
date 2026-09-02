@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:appstore": "VITE_APP_STORE=1 npm run build",
+    "tauri:build": "npm run tauri build",
+    "tauri:build:appstore": "VITE_APP_STORE=1 npm run tauri build",
     "preview": "vite preview",
     "tauri": "tauri"
   },
