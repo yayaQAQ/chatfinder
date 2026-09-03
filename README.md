@@ -77,3 +77,9 @@ npm run tauri build
 3. Open a conversation to read it with rendered Markdown and syntax highlighting.
 4. Select text to save it as a **favorite** with tags and notes for later reference.
 5. (Optional) Configure an embeddings endpoint in **Settings** to enable semantic search.
+
+## Support this project
+
+ChatFinder is open source — build it yourself and you get the whole app, with nothing held back.
+
+If you find it useful and would like to give something back, you can buy a copy on the [Mac App Store](https://apps.apple.com/app/chatfinder/id6796240541). Think of it as the "buy me a coffee" button, with the build step taken care of for you. A star on the repo is just as welcome.
