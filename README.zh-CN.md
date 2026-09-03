@@ -70,17 +70,6 @@ npm run tauri dev     # 以开发模式启动桌面应用
 npm run tauri build
 ```
 
-### 构建变体
-
-上架 Mac App Store 的版本不能出现 ChatGPT 品牌名（App Store 审核指南 5），
-因此会改用中性的「AI 对话」，并去掉 OpenAI 的嵌入预设。两个版本共用同一份代码，
-靠编译期开关区分（见 `src/lib/brand.ts`），不再需要单独维护分支：
-
-```bash
-npm run tauri build                # 公开版本
-npm run tauri:build:appstore       # App Store 版本（VITE_APP_STORE=1）
-```
-
 ## 使用说明
 
 1. 启动应用后，点击 **导入** 选择导出的 ZIP 文件（来自 Claude、ChatGPT 或 DeepSeek 的"导出数据"功能），或使用 **扫描 Agent 会话** 导入本地的 Claude Code / Codex CLI 历史记录。
