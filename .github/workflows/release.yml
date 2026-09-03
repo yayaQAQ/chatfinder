@@ -81,7 +81,32 @@ jobs:
         with:
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: "ChatFinder ${{ inputs.tag || github.ref_name }}"
-          releaseBody: "See the assets below to download and install."
+          releaseBody: |
+            下载下面对应平台的安装包。
+
+            **macOS 首次打开**：这里的构建产物没有经过 Apple 公证，从浏览器下载后会被 Gatekeeper 拦下，提示「无法打开，因为无法验证开发者」，或者干脆说「已损坏，应移到废纸篓」——后者只是提示措辞，文件本身没有损坏。把应用拖进「应用程序」后，在终端执行一次：
+
+            ```
+            xattr -cr /Applications/ChatFinder.app
+            ```
+
+            或者双击一次让它被拦下，然后到「系统设置 → 隐私与安全性」页面底部点「仍要打开」。两种方法都只需要做一次。
+
+            Windows 和 Linux 的产物不受此影响。
+
+            ---
+
+            Download the installer for your platform below.
+
+            **First launch on macOS**: these builds are not notarized by Apple, so Gatekeeper blocks them after a browser download — "cannot be opened because the developer cannot be verified", or sometimes "is damaged and can't be opened", which is just the wording, the file is fine. Drag the app into Applications, then run this once:
+
+            ```
+            xattr -cr /Applications/ChatFinder.app
+            ```
+
+            Or let the first launch be blocked, then open System Settings → Privacy & Security and click "Open Anyway" at the bottom. Either way it is a one-time step.
+
+            Windows and Linux builds are unaffected.
           # 草稿版本不会出现在仓库首页的 Releases 里，也不能被下载——
           # 直接发布，让每个 tag 都有一个可见的 Release。
           releaseDraft: false
