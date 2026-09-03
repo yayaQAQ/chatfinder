@@ -78,6 +78,12 @@ npm run tauri build
 4. Select text to save it as a **favorite** with tags and notes for later reference.
 5. (Optional) Configure an embeddings endpoint in **Settings** to enable semantic search.
 
+## Community
+
+Questions, suggestions, or just want to see how others use it — join the QQ group **534908951** ([join link](https://qm.qq.com/q/9RDpzJrF4s)):
+
+<img src="docs/qq-group.jpg" width="240" alt="ChatFinder QQ group QR code">
+
 ## Support this project
 
 ChatFinder is open source — build it yourself and you get the whole app, with nothing held back.
