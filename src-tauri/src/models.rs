@@ -19,6 +19,9 @@ pub struct NormalizedConversation {
     pub platform: String, // "claude" | "chatgpt"
     pub title: String,
     pub summary: String,
+    /// Working directory the session ran in. Only local agent sessions
+    /// (Claude Code / Codex) have one; ZIP-imported platforms leave it empty.
+    pub cwd: String,
     pub url: String,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
@@ -39,6 +42,8 @@ pub struct ConversationSummary {
     /// they first appear. A session can switch models mid-way, so this is a
     /// list rather than a single value. Empty for sources that don't report it.
     pub models: Vec<String>,
+    /// Working directory, for agent sessions. Empty for everything else.
+    pub cwd: String,
 }
 
 #[derive(Debug, Serialize, Clone)]

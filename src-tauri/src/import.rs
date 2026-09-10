@@ -130,6 +130,7 @@ fn parse_claude(arr: Vec<Value>) -> Vec<NormalizedConversation> {
                 })
                 .unwrap_or_default();
             Some(NormalizedConversation {
+                cwd: String::new(),
                 id: id.clone(),
                 platform: "claude".to_string(),
                 title,
@@ -372,6 +373,7 @@ fn parse_chatgpt(
             let messages = entries.into_iter().map(|(_, m)| m).collect();
 
             Some(NormalizedConversation {
+                cwd: String::new(),
                 id: id.clone(),
                 platform: "chatgpt".to_string(),
                 title,
@@ -506,6 +508,7 @@ fn parse_deepseek(arr: Vec<Value>) -> Vec<NormalizedConversation> {
             }
 
             Some(NormalizedConversation {
+                cwd: String::new(),
                 id: id.clone(),
                 platform: "deepseek".to_string(),
                 title,
@@ -647,13 +650,13 @@ pub(crate) fn persist_conversations(
     // message across tens of thousands of them.
     let mut conv_stmt = tx
         .prepare(
-            "INSERT INTO conversations (id, platform, title, summary, url, created_at, updated_at, message_count, models, content_hash, imported_at, import_batch_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            "INSERT INTO conversations (id, platform, title, summary, url, created_at, updated_at, message_count, models, content_hash, imported_at, import_batch_id, cwd)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT(id) DO UPDATE SET
                 platform=excluded.platform, title=excluded.title, summary=excluded.summary,
                 url=excluded.url, created_at=excluded.created_at, updated_at=excluded.updated_at,
                 message_count=excluded.message_count, models=excluded.models,
-                content_hash=excluded.content_hash,
+                content_hash=excluded.content_hash, cwd=excluded.cwd,
                 imported_at=excluded.imported_at, import_batch_id=excluded.import_batch_id",
         )
         .map_err(|e| e.to_string())?;
@@ -689,7 +692,8 @@ pub(crate) fn persist_conversations(
                 distinct_models(conv).join(","),
                 hash,
                 now,
-                batch_id
+                batch_id,
+                conv.cwd
             ])
             .map_err(|e| e.to_string())?;
 
@@ -790,6 +794,7 @@ mod parser_version_tests {
 
     fn conv(text: &str) -> NormalizedConversation {
         NormalizedConversation {
+            cwd: String::new(),
             id: "conv-1".to_string(),
             platform: "claude-code".to_string(),
             title: "Session".to_string(),
@@ -919,6 +924,7 @@ mod model_persistence_tests {
         let mut db_conn = crate::db::open(&db_path).unwrap();
 
         let conv = NormalizedConversation {
+            cwd: String::new(),
             id: "cc:models".to_string(),
             platform: "claude-code".to_string(),
             title: "Mixed session".to_string(),

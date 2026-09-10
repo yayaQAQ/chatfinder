@@ -12,5 +12,9 @@
     <true/>
     <key>com.apple.security.network.client</key>
     <true/>
+    <!-- The embedded MCP server binds 127.0.0.1 so local agents can query the
+         archive. Loopback only; the sandbox still needs the server entitlement. -->
+    <key>com.apple.security.network.server</key>
+    <true/>
 </dict>
 </plist>

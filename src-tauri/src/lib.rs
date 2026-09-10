@@ -4,12 +4,14 @@ mod db;
 mod embed;
 mod import;
 mod keywords;
+mod mcp;
 mod models;
 
 /// Thin re-exports used by integration tests to drive the import pipeline directly.
 pub mod test_support {
     pub use crate::db::open as open_for_test;
     pub use crate::import::import_zip as import_for_test;
+    pub use crate::mcp::dispatch_tool as mcp_tool_for_test;
 }
 
 use db::DbState;
@@ -53,6 +55,9 @@ pub fn run() {
                 [],
             );
             app.manage(DbState(Mutex::new(conn)));
+            app.manage(mcp::McpState::default());
+            // Comes back on its own if the user left the MCP server switched on.
+            mcp::start_if_enabled(&app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -86,6 +91,13 @@ pub fn run() {
             commands::scan_agent_sources,
             commands::import_agent_sessions,
             commands::launch_resume_terminal,
+            mcp::mcp_status,
+            mcp::mcp_set_enabled,
+            mcp::mcp_set_port,
+            mcp::mcp_regenerate_token,
+            mcp::mcp_open_enrollment,
+            mcp::mcp_cancel_enrollment,
+            mcp::mcp_activity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

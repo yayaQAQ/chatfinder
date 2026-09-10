@@ -77,6 +77,37 @@ export interface SearchHit {
   created_at: string | null;
 }
 
+export interface McpStatus {
+  enabled: boolean;
+  running: boolean;
+  /** Port actually bound — may differ from configured_port if that was taken. */
+  port: number;
+  configured_port: number;
+  token: string;
+  url: string;
+  /** Ready-to-paste registration for each supported client. */
+  setup: McpSetupSnippet[];
+  /** Seconds left on the self-service enrollment window; 0 when closed. */
+  enrollment_seconds_left: number;
+  last_error: string | null;
+}
+
+export interface McpSetupSnippet {
+  client: "claude_code" | "codex" | "json";
+  kind: "shell" | "toml" | "json";
+  content: string;
+  /** Secret-free variant that fetches the token from /enroll at run time. */
+  enroll: string | null;
+}
+
+export interface McpActivityEntry {
+  at: string;
+  tool: string;
+  detail: string;
+  duration_ms: number;
+  ok: boolean;
+}
+
 export interface EmbeddingStats {
   total_messages: number;
   indexed_messages: number;
@@ -231,4 +262,11 @@ export const api = {
     }),
   launchResumeTerminal: (command: string, cwd?: string) =>
     invoke<void>("launch_resume_terminal", { command, cwd }),
+  mcpStatus: () => invoke<McpStatus>("mcp_status"),
+  mcpSetEnabled: (enabled: boolean) => invoke<McpStatus>("mcp_set_enabled", { enabled }),
+  mcpSetPort: (port: number) => invoke<McpStatus>("mcp_set_port", { port }),
+  mcpRegenerateToken: () => invoke<McpStatus>("mcp_regenerate_token"),
+  mcpOpenEnrollment: () => invoke<McpStatus>("mcp_open_enrollment"),
+  mcpCancelEnrollment: () => invoke<McpStatus>("mcp_cancel_enrollment"),
+  mcpActivity: () => invoke<McpActivityEntry[]>("mcp_activity"),
 };

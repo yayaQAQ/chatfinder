@@ -30,7 +30,8 @@ pub fn open(path: &PathBuf) -> rusqlite::Result<Connection> {
             models TEXT NOT NULL DEFAULT '',
             content_hash TEXT NOT NULL DEFAULT '',
             imported_at TEXT NOT NULL,
-            import_batch_id TEXT
+            import_batch_id TEXT,
+            cwd TEXT NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS messages (
@@ -106,6 +107,25 @@ pub fn open(path: &PathBuf) -> rusqlite::Result<Connection> {
     //  - `messages.model` / `conversations.models` — the model behind each turn.
     // Rows written before the column existed keep the default until the source
     // is re-imported; `content_hash` covers the model, so a re-scan refreshes them.
+    //  - `conversations.cwd` — the working directory of an agent session. It used
+    //    to be squatted into `summary`, a field that ZIP-imported Claude rows use
+    //    for an AI-written prose summary instead. Overloading one column with two
+    //    unrelated meanings is fine as long as only the UI reads it, but the MCP
+    //    server exposes directories to outside agents, so it gets its own column.
+    //    `summary` is still written with the same value for now — the detail view
+    //    reads it to offer "resume in terminal".
+    add_column_if_missing(&conn, "conversations", "cwd", "TEXT NOT NULL DEFAULT ''")?;
+    conn.execute(
+        "UPDATE conversations SET cwd = summary
+         WHERE cwd = '' AND platform IN ('claude-code', 'codex') AND summary LIKE '/%'",
+        [],
+    )?;
+    // Indexed here rather than in the batch above: on an upgrade the column is
+    // only added by the ALTER TABLE on the line before this.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_conversations_cwd ON conversations(cwd) WHERE cwd != '';",
+    )?;
+
     add_column_if_missing(&conn, "messages", "kind", "TEXT NOT NULL DEFAULT 'text'")?;
     add_column_if_missing(&conn, "messages", "model", "TEXT")?;
     add_column_if_missing(&conn, "conversations", "models", "TEXT NOT NULL DEFAULT ''")?;

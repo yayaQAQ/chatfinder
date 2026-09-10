@@ -106,7 +106,7 @@ pub fn list_conversations(
     if trimmed_query.is_empty() {
         let model_sql = model_clause("models", 6);
         let sql = format!(
-            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count, models
+            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count, models, cwd
              FROM conversations
              WHERE (?1 = '' OR platform = ?1)
                AND (?2 = '' OR DATE(COALESCE(updated_at, created_at, imported_at)) >= ?2)
@@ -132,13 +132,14 @@ pub fn list_conversations(
                 updated_at: row.get(6).map_err(|e| e.to_string())?,
                 message_count: row.get(7).map_err(|e| e.to_string())?,
                 models: split_models(&row.get::<_, String>(8).map_err(|e| e.to_string())?),
+                cwd: row.get(9).map_err(|e| e.to_string())?,
             });
         }
     } else {
         let fts_query = format!("{}*", trimmed_query.replace('"', " "));
         let model_sql = model_clause("c.models", 7);
         let sql = format!(
-            "SELECT c.id, c.platform, c.title, c.summary, c.url, c.created_at, c.updated_at, c.message_count, c.models
+            "SELECT c.id, c.platform, c.title, c.summary, c.url, c.created_at, c.updated_at, c.message_count, c.models, c.cwd
              FROM search_index si
              JOIN conversations c ON c.id = si.conversation_id
              WHERE si.text MATCH ?1
@@ -170,6 +171,7 @@ pub fn list_conversations(
                 updated_at: row.get(6).map_err(|e| e.to_string())?,
                 message_count: row.get(7).map_err(|e| e.to_string())?,
                 models: split_models(&row.get::<_, String>(8).map_err(|e| e.to_string())?),
+                cwd: row.get(9).map_err(|e| e.to_string())?,
             });
         }
         let start = offset.max(0) as usize;
@@ -224,7 +226,7 @@ pub fn get_conversation(
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let conv = conn
         .query_row(
-            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count, models FROM conversations WHERE id = ?1",
+            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count, models, cwd FROM conversations WHERE id = ?1",
             params![id],
             |row| {
                 Ok(ConversationSummary {
@@ -237,6 +239,7 @@ pub fn get_conversation(
                     updated_at: row.get(6)?,
                     message_count: row.get(7)?,
                     models: split_models(&row.get::<_, String>(8)?),
+                cwd: row.get(9)?,
                 })
             },
         )
@@ -263,19 +266,18 @@ pub fn get_conversation(
     Ok((conv, messages))
 }
 
-/// Claude Code and Codex sessions store their working directory in
-/// `conversations.summary` (see agent_scan.rs) — this is the only field that
-/// currently carries it, ZIP-imported platforms always leave it empty. Used
-/// to group every session under a project directory regardless of which
-/// tool produced it.
+/// Claude Code and Codex sessions record their working directory in
+/// `conversations.cwd` (see agent_scan.rs); ZIP-imported platforms leave it
+/// empty. Used to group every session under a project directory regardless of
+/// which tool produced it.
 #[tauri::command]
 pub fn list_conversations_by_path(state: State<DbState>, path: String) -> Result<Vec<ConversationSummary>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count, models
+            "SELECT id, platform, title, summary, url, created_at, updated_at, message_count, models, cwd
              FROM conversations
-             WHERE summary = ?1 AND summary != ''
+             WHERE cwd = ?1 AND cwd != ''
              ORDER BY COALESCE(updated_at, created_at) DESC",
         )
         .map_err(|e| e.to_string())?;
@@ -291,6 +293,7 @@ pub fn list_conversations_by_path(state: State<DbState>, path: String) -> Result
                 updated_at: row.get(6)?,
                 message_count: row.get(7)?,
                 models: split_models(&row.get::<_, String>(8)?),
+                cwd: row.get(9)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -298,7 +301,7 @@ pub fn list_conversations_by_path(state: State<DbState>, path: String) -> Result
 }
 
 /// Full-text search scoped to every conversation sharing a working directory
-/// (`summary`), across whichever tool produced them — mirrors search_all's
+/// (`cwd`), across whichever tool produced them — mirrors search_all's
 /// FTS query and one-hit-per-conversation dedup, just filtered by path
 /// instead of platform/date/message-count.
 #[tauri::command]
@@ -319,7 +322,7 @@ pub fn search_conversations_by_path(
                     c.title, c.platform, c.updated_at, c.created_at
              FROM search_index si
              JOIN conversations c ON c.id = si.conversation_id
-             WHERE si.text MATCH ?1 AND c.summary = ?2 AND c.summary != ''
+             WHERE si.text MATCH ?1 AND c.cwd = ?2 AND c.cwd != ''
              ORDER BY bm25(search_index) ASC LIMIT 400",
         )
         .map_err(|e| e.to_string())?;
@@ -1236,11 +1239,11 @@ mod path_grouping_tests {
         let conn = crate::db::open(&db_path).unwrap();
         conn.execute_batch(
             "
-            INSERT INTO conversations (id, platform, title, summary, imported_at, updated_at)
+            INSERT INTO conversations (id, platform, title, cwd, imported_at, updated_at)
                 VALUES ('cc:1', 'claude-code', 'CC session', '/Users/dev/reg-factory', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-            INSERT INTO conversations (id, platform, title, summary, imported_at, updated_at)
+            INSERT INTO conversations (id, platform, title, cwd, imported_at, updated_at)
                 VALUES ('codex:1', 'codex', 'Codex session', '/Users/dev/reg-factory', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
-            INSERT INTO conversations (id, platform, title, summary, imported_at, updated_at)
+            INSERT INTO conversations (id, platform, title, cwd, imported_at, updated_at)
                 VALUES ('cc:2', 'claude-code', 'Other project', '/Users/dev/other-project', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
             INSERT INTO conversations (id, platform, title, imported_at)
                 VALUES ('claude:1', 'claude', 'ZIP-imported, no cwd', '2026-01-01T00:00:00Z');
@@ -1250,8 +1253,8 @@ mod path_grouping_tests {
 
         let mut stmt = conn
             .prepare(
-                "SELECT id, platform, title, summary, url, created_at, updated_at, message_count
-                 FROM conversations WHERE summary = ?1 AND summary != ''
+                "SELECT id, platform, title, cwd, url, created_at, updated_at, message_count
+                 FROM conversations WHERE cwd = ?1 AND cwd != ''
                  ORDER BY COALESCE(updated_at, created_at) DESC",
             )
             .unwrap();
@@ -1287,11 +1290,11 @@ mod path_search_tests {
         let conn = crate::db::open(&db_path).unwrap();
         conn.execute_batch(
             "
-            INSERT INTO conversations (id, platform, title, summary, imported_at, updated_at)
+            INSERT INTO conversations (id, platform, title, cwd, imported_at, updated_at)
                 VALUES ('cc:1', 'claude-code', 'CC session', '/Users/dev/proj', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-            INSERT INTO conversations (id, platform, title, summary, imported_at, updated_at)
+            INSERT INTO conversations (id, platform, title, cwd, imported_at, updated_at)
                 VALUES ('codex:1', 'codex', 'Codex session', '/Users/dev/proj', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
-            INSERT INTO conversations (id, platform, title, summary, imported_at, updated_at)
+            INSERT INTO conversations (id, platform, title, cwd, imported_at, updated_at)
                 VALUES ('cc:2', 'claude-code', 'Other project', '/Users/dev/other', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
 
             INSERT INTO messages (id, conversation_id, sender, text, seq)
@@ -1319,7 +1322,7 @@ mod path_search_tests {
                         c.title, c.platform, c.updated_at, c.created_at
                  FROM search_index si
                  JOIN conversations c ON c.id = si.conversation_id
-                 WHERE si.text MATCH ?1 AND c.summary = ?2 AND c.summary != ''
+                 WHERE si.text MATCH ?1 AND c.cwd = ?2 AND c.cwd != ''
                  ORDER BY bm25(search_index) ASC LIMIT 400",
             )
             .unwrap();

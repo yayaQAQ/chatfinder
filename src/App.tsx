@@ -8,6 +8,7 @@ import { AgentScanDialog } from "./components/AgentScanDialog";
 import { ImportHistoryDialog } from "./components/ImportHistoryDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { EmbedSettings } from "./components/EmbedSettings";
+import { McpSettings } from "./components/McpSettings";
 import { Conversations } from "./pages/Conversations";
 import { ConversationDetail } from "./pages/ConversationDetail";
 import { Favorites } from "./pages/Favorites";
@@ -68,6 +69,7 @@ function InnerApp() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
   const [agentScanOpen, setAgentScanOpen] = useState(false);
   const [importHistoryOpen, setImportHistoryOpen] = useState(false);
   const [embedStats, setEmbedStats] = useState<EmbeddingStats | null>(null);
@@ -158,6 +160,7 @@ function InnerApp() {
         onImportClick={() => setImportOpen(true)}
         onSearchClick={() => setPaletteOpen(true)}
         onSettingsClick={() => setSettingsOpen(true)}
+        onMcpClick={() => setMcpOpen(true)}
         onAgentScanClick={() => setAgentScanOpen(true)}
         onImportHistoryClick={() => setImportHistoryOpen(true)}
         refreshKey={refreshKey}
@@ -208,6 +211,8 @@ function InnerApp() {
           embedIndexed={embedStats?.indexed_messages ?? 0}
         />
       )}
+
+      {mcpOpen && <McpSettings onClose={() => setMcpOpen(false)} />}
 
       {settingsOpen && (
         <EmbedSettings
