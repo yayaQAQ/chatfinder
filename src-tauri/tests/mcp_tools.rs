@@ -14,7 +14,7 @@ fn fixture_db(name: &str) -> rusqlite::Connection {
           VALUES ('cc:1', 'claude-code', 'Migration work', '/Users/dev/code/proj', 3,
                   '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-03-01T00:00:00Z');
         INSERT INTO conversations (id, platform, title, cwd, message_count, imported_at, created_at, updated_at)
-          VALUES ('cx:1', 'codex', 'Sub-module work', '/Users/dev/code/proj/app', 1,
+          VALUES ('codex:1', 'codex', 'Sub-module work', '/Users/dev/code/proj/app', 1,
                   '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z', '2026-02-01T00:00:00Z');
         INSERT INTO conversations (id, platform, title, cwd, message_count, imported_at, created_at, updated_at)
           VALUES ('cc:2', 'claude-code', 'Unrelated', '/Users/dev/code/other', 1,
@@ -30,7 +30,7 @@ fn fixture_db(name: &str) -> rusqlite::Connection {
         INSERT INTO messages (id, conversation_id, sender, text, seq, kind)
           VALUES ('m3', 'cc:1', 'assistant', 'tool output noise', 2, 'tool_result');
         INSERT INTO messages (id, conversation_id, sender, text, seq, kind)
-          VALUES ('m4', 'cx:1', 'assistant', 'migration touched the app folder', 0, 'text');
+          VALUES ('m4', 'codex:1', 'assistant', 'migration touched the app folder', 0, 'text');
         INSERT INTO messages (id, conversation_id, sender, text, seq, kind)
           VALUES ('m5', 'cc:2', 'assistant', 'migration in a different project', 0, 'text');
         INSERT INTO messages (id, conversation_id, sender, text, seq, kind)
@@ -41,7 +41,7 @@ fn fixture_db(name: &str) -> rusqlite::Connection {
         INSERT INTO search_index (ref_id, conversation_id, kind, text)
           VALUES ('m2', 'cc:1', 'message', 'run the migration with cargo');
         INSERT INTO search_index (ref_id, conversation_id, kind, text)
-          VALUES ('m4', 'cx:1', 'message', 'migration touched the app folder');
+          VALUES ('m4', 'codex:1', 'message', 'migration touched the app folder');
         INSERT INTO search_index (ref_id, conversation_id, kind, text)
           VALUES ('m5', 'cc:2', 'message', 'migration in a different project');
         INSERT INTO search_index (ref_id, conversation_id, kind, text)
@@ -121,7 +121,7 @@ fn search_scoped_to_a_directory_covers_the_whole_tree_and_excludes_other_project
         .map(|h| h["conversation_id"].as_str().unwrap())
         .collect();
     assert!(ids.contains(&"cc:1"), "the project root session should match");
-    assert!(ids.contains(&"cx:1"), "a session in a subdirectory belongs to the same project");
+    assert!(ids.contains(&"codex:1"), "a session in a subdirectory belongs to the same project");
     assert!(!ids.contains(&"cc:2"), "a different project must not leak in");
     assert!(!ids.contains(&"web:1"), "a chat with no directory is out of scope");
 }
@@ -280,6 +280,78 @@ fn list_conversations_reports_more_pages_without_returning_them() {
     assert_eq!(out["has_more"], true);
     // Newest first: cc:1 was updated in March.
     assert_eq!(out["conversations"][0]["id"], "cc:1");
+}
+
+#[test]
+fn a_session_uuid_resolves_the_same_as_the_stored_id() {
+    let conn = fixture_db("session_bare");
+    // An agent knows its session as the bare uuid — that is what the CLI prints
+    // and what --resume takes. Requiring the stored `cc:` form would make the
+    // caller depend on a storage detail.
+    let uuid = "1".to_string();
+    conn.execute_batch(
+        "INSERT INTO conversations (id, platform, title, cwd, message_count, imported_at, updated_at)
+           VALUES ('cc:aaaa-bbbb', 'claude-code', 'Session', '/Users/dev/code/proj', 1,
+                   '2026-01-02T00:00:00Z', '2026-01-01T00:00:00Z');
+         INSERT INTO messages (id, conversation_id, sender, text, seq, kind)
+           VALUES ('sm1', 'cc:aaaa-bbbb', 'human', 'hello', 0, 'text');",
+    )
+    .unwrap();
+    drop(uuid);
+
+    for id in ["aaaa-bbbb", "cc:aaaa-bbbb", "/Users/a1-6/.claude/projects/x/aaaa-bbbb.jsonl"] {
+        let out = tool(&conn, "get_conversation", &json!({ "id": id })).expect(id);
+        assert_eq!(out["conversation"]["id"], "cc:aaaa-bbbb", "input was {id}");
+    }
+    // A leading fragment resolves too — ids get truncated in logs.
+    let out = tool(&conn, "find_session", &json!({ "session_id": "aaaa" })).expect("prefix");
+    assert_eq!(out["matches"][0]["id"], "cc:aaaa-bbbb");
+}
+
+#[test]
+fn a_session_carries_its_id_and_the_command_that_reopens_it() {
+    let conn = fixture_db("session_resume");
+    let out = tool(&conn, "find_session", &json!({ "session_id": "cc:1" })).expect("find");
+    let m = &out["matches"][0];
+    assert_eq!(m["session_id"], "1");
+    // Resuming in the wrong directory gives the session a different project
+    // context than it ran in, so the cwd is part of the command.
+    assert_eq!(m["resume_command"], "cd /Users/dev/code/proj && claude --resume 1");
+
+    let codex = tool(&conn, "find_session", &json!({ "session_id": "codex:1" })).expect("find codex");
+    assert_eq!(codex["matches"][0]["resume_command"], "cd /Users/dev/code/proj/app && codex resume 1");
+
+    // A web chat has no session and cannot be resumed.
+    let web = tool(&conn, "get_conversation", &json!({ "id": "web:1" })).expect("web");
+    assert!(web["conversation"]["session_id"].is_null());
+    assert!(web["conversation"]["resume_command"].is_null());
+}
+
+#[test]
+fn every_conversation_says_when_its_snapshot_was_taken() {
+    // Imports are snapshots, not a live mirror: a running session is in the
+    // archive only up to the last scan. An agent that assumes otherwise will
+    // act on a truncated history believing it is complete.
+    let conn = fixture_db("snapshot");
+    let out = tool(&conn, "get_conversation", &json!({ "id": "cc:1" })).expect("get");
+    let snap = &out["conversation"]["snapshot"];
+    assert_eq!(snap["imported_at"], "2026-01-01T00:00:00Z");
+    assert_eq!(snap["last_message_at"], "2026-03-01T00:00:00Z");
+    assert_eq!(snap["message_count"], 3);
+    assert!(snap["note"].as_str().unwrap().contains("scan"));
+}
+
+#[test]
+fn an_unknown_session_explains_why_it_might_be_missing() {
+    let conn = fixture_db("session_missing");
+    // The overwhelmingly likely cause is that the session has not been scanned
+    // yet, so saying so beats a bare "not found".
+    let out = tool(&conn, "find_session", &json!({ "session_id": "does-not-exist" })).expect("find");
+    assert_eq!(out["matches"].as_array().unwrap().len(), 0);
+    assert!(out["note"].as_str().unwrap().contains("scan"));
+
+    let err = tool(&conn, "get_conversation", &json!({ "id": "does-not-exist" })).unwrap_err();
+    assert!(err.contains("scan"), "got: {err}");
 }
 
 #[test]

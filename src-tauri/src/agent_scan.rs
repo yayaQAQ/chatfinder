@@ -545,14 +545,24 @@ fn parse_codex_session(path: &Path) -> Option<NormalizedConversation> {
 
         if ty == "session_meta" {
             let payload = value.get("payload");
-            session_id = payload
-                .and_then(|p| p.get("id"))
-                .and_then(Value::as_str)
-                .map(String::from);
-            cwd = payload
-                .and_then(|p| p.get("cwd"))
-                .and_then(Value::as_str)
-                .map(String::from);
+            // Keep the FIRST session_meta, not the last. A resumed session
+            // writes a second one describing the session it forked from, and
+            // that parent id is shared by every file resumed off it — taking
+            // the last one collapsed 74 Codex sessions into 31 ids, so 43 were
+            // lost and the survivors swapped content on every rescan. The first
+            // entry is the file's own identity and matches its filename uuid.
+            if session_id.is_none() {
+                session_id = payload
+                    .and_then(|p| p.get("id"))
+                    .and_then(Value::as_str)
+                    .map(String::from);
+            }
+            if cwd.is_none() {
+                cwd = payload
+                    .and_then(|p| p.get("cwd"))
+                    .and_then(Value::as_str)
+                    .map(String::from);
+            }
             if current_model.is_none() {
                 current_model = payload
                     .and_then(|p| p.get("model").or_else(|| {
@@ -652,6 +662,40 @@ fn parse_codex_session(path: &Path) -> Option<NormalizedConversation> {
 mod meta_sender_tests {
     use super::*;
     use std::io::Write;
+
+    /// A resumed Codex session writes a second `session_meta` describing the
+    /// session it forked from. Every file resumed off the same parent carries
+    /// that same parent id, so keeping the last one made them all collide:
+    /// on real data 74 sessions collapsed into 31 stored conversations, 43
+    /// were lost outright, and each rescan swapped which one survived.
+    #[test]
+    fn a_resumed_codex_session_keeps_its_own_id_not_its_parents() {
+        let dir = std::env::temp_dir().join(format!("codex_resume_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rollout-2026-01-01T00-00-00-child-session.jsonl");
+        let mut f = File::create(&path).unwrap();
+        // This file's own identity comes first...
+        writeln!(
+            f,
+            r#"{{"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{{"id":"child-session","cwd":"/tmp/child"}}}}"#
+        ).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"hello"}}]}}}}"#
+        ).unwrap();
+        // ...and the parent it was resumed from comes after.
+        writeln!(
+            f,
+            r#"{{"type":"session_meta","timestamp":"2026-01-01T00:00:02Z","payload":{{"id":"parent-session","cwd":"/tmp/parent"}}}}"#
+        ).unwrap();
+        drop(f);
+
+        let conv = parse_codex_session(&path).expect("should parse");
+        assert_eq!(conv.id, "codex:child-session", "the parent id would collide with its siblings");
+        assert_eq!(conv.cwd, "/tmp/child", "cwd must describe this session, not the parent");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Reproduces the real-world case reported against a `reg-factory` Claude
     /// Code session: CLI-injected local-command output/caveats/`/model`

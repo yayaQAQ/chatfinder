@@ -92,6 +92,16 @@ export interface McpStatus {
   last_error: string | null;
 }
 
+export interface AutoSyncStatus {
+  enabled: boolean;
+  interval_minutes: number;
+  interval_choices: number[];
+  last_run: string | null;
+  /** Outcome of the last run, or the error it failed with. */
+  last_result: string | null;
+  in_flight: boolean;
+}
+
 export interface McpSetupSnippet {
   client: "claude_code" | "codex" | "json";
   kind: "shell" | "toml" | "json";
@@ -262,6 +272,10 @@ export const api = {
     }),
   launchResumeTerminal: (command: string, cwd?: string) =>
     invoke<void>("launch_resume_terminal", { command, cwd }),
+  autoSyncStatus: () => invoke<AutoSyncStatus>("autosync_status"),
+  autoSyncSetEnabled: (enabled: boolean) => invoke<AutoSyncStatus>("autosync_set_enabled", { enabled }),
+  autoSyncSetInterval: (minutes: number) => invoke<AutoSyncStatus>("autosync_set_interval", { minutes }),
+  autoSyncRunNow: () => invoke<AutoSyncStatus>("autosync_run_now"),
   mcpStatus: () => invoke<McpStatus>("mcp_status"),
   mcpSetEnabled: (enabled: boolean) => invoke<McpStatus>("mcp_set_enabled", { enabled }),
   mcpSetPort: (port: number) => invoke<McpStatus>("mcp_set_port", { port }),

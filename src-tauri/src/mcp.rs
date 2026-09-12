@@ -893,23 +893,131 @@ fn tool_search(conn: &Connection, args: &Value) -> Result<Value, String> {
     }))
 }
 
+/// Turns whatever an agent is holding into conversation ids.
+///
+/// A Claude Code or Codex session is stored as `cc:<uuid>` / `codex:<uuid>`,
+/// but an agent knows its session by the bare uuid — that is what the CLI
+/// prints, what `--resume` takes, and what names the transcript file. Requiring
+/// the stored form would mean the caller has to know a storage detail, so the
+/// bare uuid, a full path to the transcript, and the stored id all resolve.
+///
+/// Returns every candidate: a prefix can legitimately match more than one.
+fn resolve_conversation_ids(conn: &Connection, input: &str) -> Result<Vec<String>, String> {
+    let raw = input.trim();
+    if raw.is_empty() {
+        return Err("an id is required".into());
+    }
+    // `~/.claude/projects/<slug>/<uuid>.jsonl` → `<uuid>`
+    let candidate = raw
+        .rsplit('/')
+        .next()
+        .unwrap_or(raw)
+        .trim_end_matches(".jsonl")
+        .trim_start_matches("rollout-");
+
+    let exists = |id: &str| -> bool {
+        conn.query_row("SELECT 1 FROM conversations WHERE id = ?1", [id], |_| Ok(()))
+            .is_ok()
+    };
+    if exists(candidate) {
+        return Ok(vec![candidate.to_string()]);
+    }
+    for prefix in ["cc:", "codex:"] {
+        let prefixed = format!("{prefix}{candidate}");
+        if exists(&prefixed) {
+            return Ok(vec![prefixed]);
+        }
+    }
+
+    // Nothing matched outright — fall back to a prefix search, which covers the
+    // shortened ids that show up in logs and terminal output.
+    let mut stmt = conn
+        .prepare(
+            "SELECT id FROM conversations
+             WHERE id = ?1 OR id LIKE 'cc:' || ?1 || '%' OR id LIKE 'codex:' || ?1 || '%'
+                OR id LIKE ?1 || '%'
+             ORDER BY id LIMIT 10",
+        )
+        .map_err(|e| e.to_string())?;
+    let ids: Vec<String> = stmt
+        .query_map([candidate], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(ids)
+}
+
+/// Resolves to exactly one id, turning "none" and "several" into messages an
+/// agent can act on rather than a bare failure.
+fn resolve_one(conn: &Connection, input: &str) -> Result<String, String> {
+    let ids = resolve_conversation_ids(conn, input)?;
+    match ids.len() {
+        1 => Ok(ids.into_iter().next().unwrap()),
+        0 => Err(format!(
+            "no imported conversation matches \"{input}\". Agent sessions only appear after ChatFinder scans them — a session that is still running, or that started since the last scan, will not be here yet."
+        )),
+        _ => Err(format!(
+            "\"{input}\" matches several conversations: {}. Pass the full id.",
+            ids.join(", ")
+        )),
+    }
+}
+
+/// The session id an agent would recognise, plus the command that reopens it.
+fn session_fields(id: &str, platform: &str, cwd: &str) -> (Option<String>, Option<String>) {
+    let Some(session_id) = (match platform {
+        "claude-code" => id.strip_prefix("cc:"),
+        "codex" => id.strip_prefix("codex:"),
+        // ZIP-imported web chats have no session and cannot be resumed.
+        _ => None,
+    }) else {
+        return (None, None);
+    };
+    let command = match platform {
+        "claude-code" => format!("claude --resume {session_id}"),
+        _ => format!("codex resume {session_id}"),
+    };
+    // The working directory matters: resuming elsewhere gives the session a
+    // different project context than it ran in.
+    let command = if cwd.is_empty() { command } else { format!("cd {cwd} && {command}") };
+    (Some(session_id.to_string()), Some(command))
+}
+
 fn conversation_header(conn: &Connection, id: &str) -> Result<Value, String> {
     conn.query_row(
-        "SELECT id, platform, title, url, created_at, updated_at, message_count, models, cwd
+        "SELECT id, platform, title, url, created_at, updated_at, message_count, models, cwd, imported_at
          FROM conversations WHERE id = ?1",
         [id],
         |r| {
             let models: String = r.get(7)?;
+            let id: String = r.get(0)?;
+            let platform: String = r.get(1)?;
+            let cwd: String = r.get(8)?;
+            let (session_id, resume_command) = session_fields(&id, &platform, &cwd);
+            let last_message_at: Option<String> = r.get(5)?;
+            let imported_at: String = r.get(9)?;
+            let message_count: i64 = r.get(6)?;
             Ok(json!({
-                "id": r.get::<_, String>(0)?,
-                "platform": r.get::<_, String>(1)?,
+                "id": id,
+                "platform": platform,
                 "title": r.get::<_, String>(2)?,
                 "url": r.get::<_, Option<String>>(3)?,
                 "created_at": r.get::<_, Option<String>>(4)?,
-                "updated_at": r.get::<_, Option<String>>(5)?,
-                "message_count": r.get::<_, i64>(6)?,
+                "updated_at": last_message_at,
+                "message_count": message_count,
                 "models": models.split(',').filter(|s| !s.is_empty()).collect::<Vec<_>>(),
-                "cwd": r.get::<_, String>(8)?,
+                "cwd": cwd,
+                "session_id": session_id,
+                "resume_command": resume_command,
+                // Imports are snapshots taken by a scan, not a live mirror. Saying
+                // so inline is the difference between an agent knowing it has
+                // partial history and it assuming this is the whole conversation.
+                "snapshot": {
+                    "imported_at": imported_at,
+                    "last_message_at": last_message_at,
+                    "message_count": message_count,
+                    "note": "Captured when ChatFinder last scanned agent sessions. Anything said after imported_at — including the rest of a session that is still running — is not here until the next scan.",
+                },
             }))
         },
     )
@@ -946,7 +1054,7 @@ fn read_messages(
 }
 
 fn tool_get_conversation(conn: &Connection, args: &Value) -> Result<Value, String> {
-    let id = arg_str(args, "id").ok_or("`id` is required")?;
+    let id = resolve_one(conn, &arg_str(args, "id").ok_or("`id` is required")?)?;
     let header = conversation_header(conn, &id)?;
     let offset = clamp(arg_i64(args, "offset").unwrap_or(0), 0, i64::MAX);
     let limit = clamp(arg_i64(args, "limit").unwrap_or(50), 1, 200);
@@ -994,6 +1102,33 @@ fn tool_get_conversation(conn: &Connection, args: &Value) -> Result<Value, Strin
         },
         "truncated_messages": truncated,
         "hint": "Agent sessions are mostly tool_use/tool_result. Pass kinds:[\"text\"] to read just the conversation.",
+    }))
+}
+
+/// Session id → conversation, without pulling any messages.
+///
+/// The cheap probe an agent makes before deciding whether to read: does this
+/// session exist in the archive, how much of it was captured, and how stale is
+/// that capture.
+fn tool_find_session(conn: &Connection, args: &Value) -> Result<Value, String> {
+    let input = arg_str(args, "session_id").ok_or("`session_id` is required")?;
+    let ids = resolve_conversation_ids(conn, &input)?;
+    if ids.is_empty() {
+        return Ok(json!({
+            "query": input,
+            "matches": [],
+            "note": "No imported conversation matches that id. Agent sessions appear only after ChatFinder scans them, so a session that is still running — or that started since the last scan — will not be here yet.",
+        }));
+    }
+    let matches = ids
+        .iter()
+        .map(|id| conversation_header(conn, id))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(json!({
+        "query": input,
+        "matches": matches,
+        "returned": matches.len(),
+        "next_step": "Pass the `id` of a match to get_conversation to read it.",
     }))
 }
 
@@ -1105,11 +1240,22 @@ fn tool_definitions() -> Value {
                 "type": "object",
                 "required": ["id"],
                 "properties": {
-                    "id": { "type": "string" },
+                    "id": { "type": "string", "description": "A conversation id, or a Claude Code / Codex session uuid — both resolve." },
                     "offset": { "type": "integer", "description": "Message index to start at (default 0)." },
                     "limit": { "type": "integer", "description": "Default 50, max 200." },
                     "kinds": { "type": "array", "items": { "type": "string" }, "description": "Keep only these message kinds, e.g. [\"text\"]." },
                     "max_chars_per_message": { "type": "integer", "description": "Default 2000." }
+                }
+            }
+        },
+        {
+            "name": "find_session",
+            "description": "Look up a Claude Code or Codex session by its session id — the uuid the CLI prints and that `--resume` takes. Accepts the bare uuid, the stored id (cc:<uuid> / codex:<uuid>), a path to the transcript file, or a leading fragment of any of those. Returns what was captured and when, plus the command to resume that session, but no messages.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": { "type": "string", "description": "e.g. \"bfa0f45e-798e-4673-b671-eed384af4c51\"." }
                 }
             }
         },
@@ -1139,6 +1285,7 @@ pub fn dispatch_tool(conn: &Connection, name: &str, args: &Value) -> Result<Valu
         "search" => tool_search(conn, args),
         "list_conversations" => tool_list_conversations(conn, args),
         "get_conversation" => tool_get_conversation(conn, args),
+        "find_session" => tool_find_session(conn, args),
         "get_message_context" => tool_get_message_context(conn, args),
         other => Err(format!("unknown tool: {other}")),
     }
@@ -1208,7 +1355,10 @@ fn handle_message(app: &AppHandle, msg: &Value) -> Option<Value> {
 (Claude, ChatGPT, DeepSeek exports plus local Claude Code and Codex sessions). Call `overview` first, \
 passing your current working directory as `cwd` — agent sessions are indexed by the directory they ran in, \
 so that is how you find prior work on the project at hand. Note that web chats have no directory: after \
-scoping by cwd, also search the whole library using the project name as a keyword.",
+scoping by cwd, also search the whole library using the project name as a keyword. To pick up where an \
+earlier Claude Code or Codex session left off, pass its session uuid to `find_session`. Everything here is \
+a snapshot taken by the last scan, never a live mirror — check each result's `snapshot.imported_at` before \
+treating it as complete.",
                 }),
             ))
         }

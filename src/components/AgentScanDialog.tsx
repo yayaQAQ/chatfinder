@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { X, FolderSearch, FolderOpen, CheckCircle2, Bot, Loader2, RefreshCw } from "lucide-react";
-import { api, type AgentSource, type AgentDirOverrides, type ImportSummary, type ImportProgress as Progress } from "../lib/api";
+import { X, FolderSearch, FolderOpen, CheckCircle2, Bot, Loader2, RefreshCw, Clock } from "lucide-react";
+import { api, type AutoSyncStatus, type AgentSource, type AgentDirOverrides, type ImportSummary, type ImportProgress as Progress } from "../lib/api";
 import { useToast } from "../lib/toast";
 import { useI18n } from "../lib/i18n";
 
@@ -31,6 +31,8 @@ export function AgentScanDialog({ onClose, onImported }: Props) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [overrides, setOverrides] = useState<AgentDirOverrides>({});
+  const [autoSync, setAutoSync] = useState<AutoSyncStatus | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [pickingTool, setPickingTool] = useState<string | null>(null);
   const { push } = useToast();
   const { t } = useI18n();
@@ -94,6 +96,26 @@ export function AgentScanDialog({ onClose, onImported }: Props) {
     setOverrides(nextOverrides);
     await scan(nextOverrides);
   };
+
+  useEffect(() => {
+    api.autoSyncStatus().then(setAutoSync).catch(() => {});
+  }, []);
+
+  const runAutoSyncAction = async (fn: () => Promise<AutoSyncStatus>) => {
+    setSyncing(true);
+    try {
+      setAutoSync(await fn());
+    } catch (e) {
+      push(t("agentScanDialog.autoSyncFailed", { error: String(e) }), "error");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const intervalLabel = (m: number) =>
+    m >= 1440 ? t("agentScanDialog.autoSyncDaily")
+      : m >= 60 ? t("agentScanDialog.autoSyncHours", { n: m / 60 })
+      : t("agentScanDialog.autoSyncMinutes", { n: m });
 
   const totalSessions = sources
     .filter((s) => selected.has(s.tool))
@@ -385,6 +407,81 @@ export function AgentScanDialog({ onClose, onImported }: Props) {
               >
                 {t("agentScanDialog.done")}
               </button>
+            </div>
+          )}
+
+          {/* Automatic resync — what keeps the archive, and everything MCP
+              serves from it, from going stale between manual scans. */}
+          {autoSync && !busy && (
+            <div className="mt-4 rounded-xl border border-stone-200 px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-stone-800">
+                    <Clock size={14} className="shrink-0 text-stone-400" />
+                    {t("agentScanDialog.autoSyncTitle")}
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-stone-500">
+                    {t("agentScanDialog.autoSyncHint")}
+                  </p>
+                </div>
+                <button
+                  disabled={syncing}
+                  onClick={() => runAutoSyncAction(() => api.autoSyncSetEnabled(!autoSync.enabled))}
+                  aria-pressed={autoSync.enabled}
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+                    autoSync.enabled ? "bg-emerald-500" : "bg-stone-300"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                      autoSync.enabled ? "left-[22px]" : "left-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {autoSync.enabled && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-stone-500">{t("agentScanDialog.autoSyncEvery")}</span>
+                  {autoSync.interval_choices.map((m) => (
+                    <button
+                      key={m}
+                      disabled={syncing}
+                      onClick={() => runAutoSyncAction(() => api.autoSyncSetInterval(m))}
+                      className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+                        autoSync.interval_minutes === m
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                          : "border-stone-200 bg-stone-50 text-stone-600 hover:bg-stone-100"
+                      }`}
+                    >
+                      {intervalLabel(m)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-xs text-stone-400">
+                  {autoSync.last_run
+                    ? t("agentScanDialog.autoSyncLastRun", {
+                        when: new Date(autoSync.last_run).toLocaleString(),
+                        result: autoSync.last_result ?? "",
+                      })
+                    : t("agentScanDialog.autoSyncNever")}
+                </span>
+                <button
+                  disabled={syncing || autoSync.in_flight}
+                  onClick={() => runAutoSyncAction(async () => {
+                    const next = await api.autoSyncRunNow();
+                    onImported();
+                    return next;
+                  })}
+                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-stone-200 px-2.5 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50 disabled:opacity-50"
+                >
+                  <RefreshCw size={12} className={syncing ? "animate-spin" : ""} />
+                  {syncing ? t("agentScanDialog.autoSyncRunning") : t("agentScanDialog.autoSyncNow")}
+                </button>
+              </div>
             </div>
           )}
         </div>
