@@ -7,6 +7,7 @@ A cross-platform desktop app (Tauri + React) for importing, browsing, and search
 ## Links
 
 - **Mac App Store** → [Download ChatFinder](https://apps.apple.com/app/chatfinder/id6796240541)
+- **Downloads (macOS / Windows / Linux)** → [GitHub Releases](https://github.com/yayaQAQ/chatfinder/releases/latest)
 - **Website** → [chatfinder.newapiratio.com](https://chatfinder.newapiratio.com/)
 - **Support & FAQ** → [chatfinder.newapiratio.com/support](https://chatfinder.newapiratio.com/support/)
 - **Privacy Policy** → [chatfinder.newapiratio.com/privacy](https://chatfinder.newapiratio.com/privacy/)
@@ -18,14 +19,16 @@ A cross-platform desktop app (Tauri + React) for importing, browsing, and search
   - ChatGPT (`conversations.json` / split `conversations-NNN.json`, including inline image attachments)
   - DeepSeek (`conversations.json` with `mapping` + `fragments`, including model "thinking" blocks)
 - **Local agent session import** — scans `~/.claude/projects` and `~/.codex/sessions` for Claude Code / Codex CLI transcripts and imports them as conversations too, keeping tool calls, tool results and thinking blocks as separately filterable content.
-- **Resume in the terminal** — from a Claude Code / Codex session, open a terminal in that session's original working directory and run `claude --resume <id>` / `codex resume <id>`. Choose Terminal.app or iTerm2, and preset a proxy and extra CLI arguments. (macOS only)
+- **Resume in the terminal** — from a Claude Code / Codex session, open a terminal in that session's original working directory and run `claude --resume <id>` / `codex resume <id>`, with a proxy and extra CLI arguments preset. Works on all three platforms: Terminal.app or iTerm2 on macOS, Windows Terminal / PowerShell / cmd on Windows, and whichever of gnome-terminal, konsole, kitty and friends is installed on Linux. iTerm2 and Windows Terminal can open a tab in the window you already have open instead of a new one, and a copy button hands you the same command — spelled for the shell that will run it — if you would rather paste it yourself.
+- **MCP server** — a read-only, loopback-only HTTP MCP endpoint that lets local AI agents search this archive themselves: scope by working directory, full-text search, read a conversation, or pull up another Claude Code / Codex session by its uuid to see what it did. One-paste registration snippets for Claude Code, Codex and generic clients, with a self-service enrollment window so the token never lands in a transcript.
+- **Automatic agent sync** — rescans local agent sessions on a timer, so work you finish in a terminal turns up in the archive without a manual scan.
 - **Model tracking and filtering** — records which model produced each reply (Claude Code, Codex, ChatGPT and DeepSeek exports all carry it), so a session that switched models mid-way shows exactly where, and the whole library can be filtered by model.
 - **Grouped by project directory** — sessions sharing a working directory are collected together regardless of which tool produced them, with full-text search scoped to that directory.
 - **Full-text search** across all conversations and messages (SQLite FTS5 + BM25 ranking), with filters by platform, model, date range, message count, and sender (user input only / AI replies only).
 - **Semantic search** — generate embeddings via any OpenAI-compatible `/v1/embeddings` endpoint and search by meaning, not just keywords.
 - **Favorites** — save message snippets (Markdown preserved) with notes and auto-suggested/custom tags; browse and search your favorites separately.
 - **Conversation viewer** with Markdown + syntax-highlighted code rendering, plus in-conversation search that steps through and highlights each match.
-- **Command palette** (`⌘K`) for quick navigation.
+- **Command palette** (`⌘K` / `Ctrl+K`) for quick navigation.
 - **JSON viewer** — drop in any `.json` file to browse it without importing.
 - **Import management** — every import is recorded as a batch that can be rolled back as a whole, and single conversations can be deleted (messages, favorites, index rows and embeddings all cleaned up).
 - **Incremental, idempotent imports** — re-importing the same export only adds new/changed conversations (content-hash based dedup), so you can safely import newer exports over time.
@@ -50,6 +53,8 @@ app/
     └── src/
         ├── import.rs         # ZIP parsing + platform-specific normalization
         ├── agent_scan.rs     # Claude Code / Codex local session discovery + import
+        ├── autosync.rs       # Timed rescan of local agent sessions
+        ├── mcp.rs            # Loopback MCP server exposing the archive to agents
         ├── db.rs             # SQLite schema + migrations
         ├── embed.rs          # Embedding API client + cosine similarity search
         ├── keywords.rs       # Tag auto-suggestion
