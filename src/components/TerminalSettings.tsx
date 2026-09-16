@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { X, TerminalSquare, Save } from "lucide-react";
 import { Select } from "./Select";
-import { api } from "../lib/api";
+import { api, type TerminalOption } from "../lib/api";
 import { useToast } from "../lib/toast";
 import { useI18n } from "../lib/i18n";
 
@@ -11,7 +11,8 @@ interface Props {
 }
 
 export function TerminalSettings({ onClose, onSaved }: Props) {
-  const [terminal, setTerminal] = useState("terminal");
+  const [terminal, setTerminal] = useState("");
+  const [termOptions, setTermOptions] = useState<TerminalOption[]>([]);
   const [proxy, setProxy] = useState("");
   const [claudeArgs, setClaudeArgs] = useState("");
   const [codexArgs, setCodexArgs] = useState("");
@@ -20,15 +21,17 @@ export function TerminalSettings({ onClose, onSaved }: Props) {
   const { push } = useToast();
   const { t } = useI18n();
 
-  // Load persisted settings
+  // Load persisted settings. The terminal list comes from the backend: which
+  // apps exist depends on the host OS (and on Linux, on what's installed).
   useEffect(() => {
     Promise.all([
-      api.getSetting("preferred_terminal"),
+      api.terminalEnv(),
       api.getSetting("resume_proxy"),
       api.getSetting("claude_code_args"),
       api.getSetting("codex_args"),
-    ]).then(([term, proxyUrl, claude, codex]) => {
-      if (term) setTerminal(term);
+    ]).then(([env, proxyUrl, claude, codex]) => {
+      setTermOptions(env.options);
+      setTerminal(env.preferred);
       if (proxyUrl) setProxy(proxyUrl);
       if (claude) setClaudeArgs(claude);
       if (codex) setCodexArgs(codex);
@@ -86,11 +89,21 @@ export function TerminalSettings({ onClose, onSaved }: Props) {
               value={terminal}
               onChange={setTerminal}
               className={`${inputCls} cursor-pointer`}
-              options={[
-                { value: "terminal", label: t("terminalSettings.terminalOptionDefault") },
-                { value: "iterm2", label: t("terminalSettings.terminalOptionIterm") },
-              ]}
+              options={termOptions.map((o) => ({
+                value: o.value,
+                label:
+                  o.mode === "default"
+                    ? t("terminalSettings.terminalOptionAuto")
+                    : `${o.label}${t(
+                        o.mode === "tab"
+                          ? "terminalSettings.terminalModeTab"
+                          : "terminalSettings.terminalModeWindow",
+                      )}`,
+              }))}
             />
+            {loaded && termOptions.length === 0 && (
+              <p className="mt-1 text-[11px] text-amber-600">{t("terminalSettings.noTerminals")}</p>
+            )}
           </div>
 
           {/* Proxy URL */}

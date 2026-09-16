@@ -2,7 +2,11 @@
 @import "highlight.js/styles/github-dark-dimmed.css";
 
 @theme {
-  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  /* One stack per platform, in order: macOS (PingFang), Windows (YaHei),
+     Linux (Noto/Source Han). Without the CJK fallbacks Linux renders
+     Chinese in whatever the generic sans happens to be. */
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+    "Source Han Sans SC", "WenQuanYi Micro Hei", system-ui, sans-serif;
   --animate-shimmer: shimmer 1.4s ease-in-out infinite;
   @keyframes shimmer {
     0%   { transform: translateX(-100%); }
@@ -62,7 +66,8 @@ body {
   padding: 0.1em 0.4em;
   font-size: 0.82em;
   color: #be185d;
-  font-family: ui-monospace, "SFMono-Regular", "Fira Code", monospace;
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas,
+    "Fira Code", "DejaVu Sans Mono", monospace;
 }
 
 .message-content ul,

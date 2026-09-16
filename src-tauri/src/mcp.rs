@@ -198,17 +198,31 @@ impl Rel {
 /// Ancestor matching stops here. `/Users/alice` is an ancestor of every project
 /// a person owns, so treating it as "related" would make the filter meaningless;
 /// requiring three components keeps `/Users/alice/Code/proj` and rejects `/Users`
-/// and `/Users/alice`.
+/// and `/Users/alice`. Counted in *meaningful* components — see `depth`.
 const MIN_ANCESTOR_COMPONENTS: usize = 3;
+
+/// Both separators are accepted everywhere: a path can reach this code from the
+/// host filesystem or from a session recorded on another machine, so the shape
+/// of the string is not a reliable guide to the OS it came from.
+const SEPARATORS: [char; 2] = ['/', '\\'];
+
+/// `c:` — a Windows drive letter, which is structural rather than a directory
+/// anyone chose, so it is excluded from the depth requirement.
+fn is_drive(component: &str) -> bool {
+    let b = component.as_bytes();
+    b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+}
 
 pub fn normalize_path(input: &str) -> String {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return String::new();
     }
-    let expanded = if trimmed == "~" || trimmed.starts_with("~/") {
+    let is_home_relative = trimmed == "~"
+        || trimmed.strip_prefix('~').is_some_and(|r| r.starts_with(SEPARATORS));
+    let expanded = if is_home_relative {
         match dirs::home_dir() {
-            Some(home) => home.join(trimmed.trim_start_matches('~').trim_start_matches('/')),
+            Some(home) => home.join(trimmed.trim_start_matches('~').trim_start_matches(SEPARATORS)),
             None => std::path::PathBuf::from(trimmed),
         }
     } else {
@@ -219,18 +233,36 @@ pub fn normalize_path(input: &str) -> String {
     // the same place differently. A path that no longer exists is kept as-is.
     let resolved = std::fs::canonicalize(&expanded).unwrap_or(expanded);
     let s = resolved.to_string_lossy().to_string();
-    let s = s.trim_end_matches('/').to_string();
+    // Windows `canonicalize` hands back an extended-length path (`\\?\C:\x`);
+    // the agent transcripts record the plain form, so strip the prefix or
+    // nothing would ever match.
+    let s = match s.strip_prefix(r"\\?\UNC\") {
+        Some(rest) => format!(r"\\{rest}"),
+        None => s.strip_prefix(r"\\?\").unwrap_or(&s).to_string(),
+    };
+    let s = s.trim_end_matches(SEPARATORS).to_string();
+    // A bare root trims away to nothing on POSIX; `C:` is already the root.
     if s.is_empty() { "/".to_string() } else { s }
 }
 
 fn components(path: &str) -> Vec<String> {
-    path.trim_matches('/')
-        .split('/')
+    path.trim_matches(SEPARATORS)
+        .split(SEPARATORS)
         .filter(|c| !c.is_empty())
-        // APFS is case-insensitive by default, so `/users/a/Proj` and
-        // `/Users/a/proj` are the same directory.
+        // APFS is case-insensitive by default (so is NTFS), so `/users/a/Proj`
+        // and `/Users/a/proj` are the same directory.
         .map(|c| c.to_lowercase())
         .collect()
+}
+
+/// How many components a person actually chose. Dropping a leading drive letter
+/// keeps `C:\Users\alice` as shallow as `/Users/alice`, so the ancestor cutoff
+/// means the same thing on both platforms.
+fn depth(comps: &[String]) -> usize {
+    match comps.first() {
+        Some(first) if is_drive(first) => comps.len() - 1,
+        _ => comps.len(),
+    }
 }
 
 pub fn relation(query: &str, stored: &str) -> Option<Rel> {
@@ -243,10 +275,10 @@ pub fn relation(query: &str, stored: &str) -> Option<Rel> {
         return Some(Rel::Exact);
     }
     if q.len() > s.len() && q[..s.len()] == s[..] {
-        return if s.len() >= MIN_ANCESTOR_COMPONENTS { Some(Rel::Ancestor) } else { None };
+        return if depth(&s) >= MIN_ANCESTOR_COMPONENTS { Some(Rel::Ancestor) } else { None };
     }
     if s.len() > q.len() && s[..q.len()] == q[..] {
-        return if q.len() >= MIN_ANCESTOR_COMPONENTS { Some(Rel::Descendant) } else { None };
+        return if depth(&q) >= MIN_ANCESTOR_COMPONENTS { Some(Rel::Descendant) } else { None };
     }
     None
 }
@@ -506,7 +538,8 @@ fn tool_overview(conn: &Connection, args: &Value) -> Result<Value, String> {
             .find(|(_, r)| *r != Rel::Descendant)
             .map(|(d, _)| d.path.clone())
             .unwrap_or_else(|| normalized.clone())
-            .rsplit('/')
+            .trim_end_matches(SEPARATORS)
+            .rsplit(SEPARATORS)
             .next()
             .unwrap_or("")
             .to_string();
@@ -909,7 +942,7 @@ fn resolve_conversation_ids(conn: &Connection, input: &str) -> Result<Vec<String
     }
     // `~/.claude/projects/<slug>/<uuid>.jsonl` → `<uuid>`
     let candidate = raw
-        .rsplit('/')
+        .rsplit(SEPARATORS)
         .next()
         .unwrap_or(raw)
         .trim_end_matches(".jsonl")
@@ -1235,7 +1268,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "get_conversation",
-            "description": "Read one conversation, paginated. Long messages are truncated per message. Agent sessions are mostly tool calls — pass kinds:[\"text\"] to read only the actual dialogue.",
+            "description": "Read one conversation, paginated — including another Claude Code or Codex session, by its session uuid, which is how you look at what a different session did. Long messages are truncated per message. Agent sessions are mostly tool calls — pass kinds:[\"text\"] to read only the actual dialogue.",
             "inputSchema": {
                 "type": "object",
                 "required": ["id"],
@@ -1250,7 +1283,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "find_session",
-            "description": "Look up a Claude Code or Codex session by its session id — the uuid the CLI prints and that `--resume` takes. Accepts the bare uuid, the stored id (cc:<uuid> / codex:<uuid>), a path to the transcript file, or a leading fragment of any of those. Returns what was captured and when, plus the command to resume that session, but no messages.",
+            "description": "Look up a Claude Code or Codex session by its session id — the uuid the CLI prints and that `--resume` takes. Use it to check what another session was about before reading it, or to get the command to resume it. Accepts the bare uuid, the stored id (cc:<uuid> / codex:<uuid>), a path to the transcript file, or a leading fragment of any of those. Returns what was captured and when, but no messages — pass the `id` it returns to get_conversation for those, or skip this tool and hand get_conversation the uuid directly.",
             "inputSchema": {
                 "type": "object",
                 "required": ["session_id"],
@@ -1355,9 +1388,10 @@ fn handle_message(app: &AppHandle, msg: &Value) -> Option<Value> {
 (Claude, ChatGPT, DeepSeek exports plus local Claude Code and Codex sessions). Call `overview` first, \
 passing your current working directory as `cwd` — agent sessions are indexed by the directory they ran in, \
 so that is how you find prior work on the project at hand. Note that web chats have no directory: after \
-scoping by cwd, also search the whole library using the project name as a keyword. To pick up where an \
-earlier Claude Code or Codex session left off, pass its session uuid to `find_session`. Everything here is \
-a snapshot taken by the last scan, never a live mirror — check each result's `snapshot.imported_at` before \
+scoping by cwd, also search the whole library using the project name as a keyword. When you already know a \
+Claude Code or Codex session's uuid — the one the CLI prints — you do not have to search for it: pass it to \
+`get_conversation` to read that session from inside this one, or to `find_session` first to see what it is \
+and how to resume it. Everything here is a snapshot taken by the last scan, never a live mirror — check each result's `snapshot.imported_at` before \
 treating it as complete.",
                 }),
             ))
@@ -1779,32 +1813,65 @@ pub struct SetupSnippet {
 /// variable, so a config block with an inline header is one paste instead of
 /// two steps. Everything else follows the conventional `mcpServers` JSON.
 fn setup_snippets(url: &str, token: &str) -> Vec<SetupSnippet> {
+    setup_snippets_for(url, token, cfg!(target_os = "windows"))
+}
+
+/// `powershell`: spell the one-liners for PowerShell rather than a POSIX shell.
+/// Split out from `setup_snippets` so both dialects stay testable from any host.
+fn setup_snippets_for(url: &str, token: &str, powershell: bool) -> Vec<SetupSnippet> {
     let enroll_url = url.trim_end_matches("/mcp").to_string() + "/enroll";
-    let fetch = format!("TOKEN=$(curl -sf {enroll_url})");
+    let claude_add = |tok: &str| {
+        format!(
+            "claude mcp add --scope user --transport http {SERVER_NAME} {url} --header \"Authorization: Bearer {tok}\""
+        )
+    };
+    let codex_toml = |tok: &str| {
+        format!(
+            "[mcp_servers.{SERVER_NAME}]\nurl = \"{url}\"\n\n[mcp_servers.{SERVER_NAME}.http_headers]\nAuthorization = \"Bearer {tok}\""
+        )
+    };
+
+    let (shell_kind, claude_enroll, codex_enroll) = if powershell {
+        // `.Trim()` because the endpoint answers with a bare text body, and a
+        // trailing newline would travel into the Authorization header.
+        let fetch = format!("$TOKEN = (Invoke-RestMethod -Uri {enroll_url}).Trim()");
+        (
+            "powershell",
+            format!("{fetch}; {}", claude_add("$TOKEN")),
+            // A here-string keeps the TOML literal: PowerShell expands $TOKEN
+            // inside it but leaves the quotes and newlines alone.
+            format!(
+                "{fetch}\nAdd-Content -Path \"$env:USERPROFILE\\.codex\\config.toml\" -Value @\"\n\n{}\n\"@",
+                codex_toml("$TOKEN")
+            ),
+        )
+    } else {
+        let fetch = format!("TOKEN=$(curl -sf {enroll_url})");
+        (
+            "shell",
+            format!("{fetch} && {}", claude_add("$TOKEN")),
+            // printf keeps the token in an argument rather than in the format
+            // string, so a stray % in it cannot be interpreted.
+            format!(
+                "{fetch} && printf '\\n[mcp_servers.{SERVER_NAME}]\\nurl = \"{url}\"\\n\\n[mcp_servers.{SERVER_NAME}.http_headers]\\nAuthorization = \"Bearer %s\"\\n' \"$TOKEN\" >> ~/.codex/config.toml"
+            ),
+        )
+    };
+
     vec![
         SetupSnippet {
             client: "claude_code".into(),
-            kind: "shell".into(),
-            content: format!(
-                "claude mcp add --scope user --transport http {SERVER_NAME} {url} --header \"Authorization: Bearer {token}\""
-            ),
-            enroll: Some(format!(
-                "{fetch} && claude mcp add --scope user --transport http {SERVER_NAME} {url} --header \"Authorization: Bearer $TOKEN\""
-            )),
+            kind: shell_kind.into(),
+            content: claude_add(token),
+            enroll: Some(claude_enroll),
         },
         SetupSnippet {
             client: "codex".into(),
             kind: "toml".into(),
-            content: format!(
-                "[mcp_servers.{SERVER_NAME}]\nurl = \"{url}\"\n\n[mcp_servers.{SERVER_NAME}.http_headers]\nAuthorization = \"Bearer {token}\""
-            ),
+            content: codex_toml(token),
             // `codex mcp add` can only point at an environment variable name,
             // never an inline header, so the config block is appended directly.
-            // printf keeps the token in an argument rather than in the format
-            // string, so a stray % in it cannot be interpreted.
-            enroll: Some(format!(
-                "{fetch} && printf '\\n[mcp_servers.{SERVER_NAME}]\\nurl = \"{url}\"\\n\\n[mcp_servers.{SERVER_NAME}.http_headers]\\nAuthorization = \"Bearer %s\"\\n' \"$TOKEN\" >> ~/.codex/config.toml"
-            )),
+            enroll: Some(codex_enroll),
         },
         SetupSnippet {
             client: "json".into(),
@@ -1995,6 +2062,59 @@ mod tests {
     }
 
     #[test]
+    fn windows_paths_match_the_same_way_posix_ones_do() {
+        // Recorded cwds come from the agent transcript verbatim, so on Windows
+        // every path in play is backslash-separated and drive-rooted.
+        assert_eq!(
+            relation(r"C:\Users\dev\Code\proj\app\src", r"C:\Users\dev\Code\proj"),
+            Some(Rel::Ancestor)
+        );
+        assert_eq!(
+            relation(r"C:\Users\dev\Code\proj", r"C:\Users\dev\Code\proj\app"),
+            Some(Rel::Descendant)
+        );
+        assert_eq!(
+            relation(r"C:\Users\Dev\Code\Proj", r"c:\users\dev\code\proj"),
+            Some(Rel::Exact)
+        );
+        assert_eq!(relation(r"C:\Users\dev\proj-a", r"C:\Users\dev\proj-b"), None);
+        // A trailing separator is noise, in either spelling.
+        assert_eq!(relation(r"C:\Users\dev\proj\", r"C:\Users\dev\proj"), Some(Rel::Exact));
+    }
+
+    #[test]
+    fn the_drive_letter_does_not_buy_a_level_of_depth() {
+        // C:\Users\dev is the home directory, just like /Users/dev — counting
+        // the drive as a component would let it through as a "project".
+        assert_eq!(relation(r"C:\Users\dev\Code\proj", r"C:\Users\dev"), None);
+        assert_eq!(relation(r"C:\Users\dev\Code\proj", r"C:\Users"), None);
+        assert_eq!(
+            relation(r"C:\Users\dev\Code\proj", r"C:\Users\dev\Code"),
+            Some(Rel::Ancestor)
+        );
+    }
+
+    #[test]
+    fn the_extended_length_prefix_is_stripped_before_matching() {
+        // Windows `canonicalize` returns `\\?\C:\...`, but a session transcript
+        // records the plain `C:\...` — left alone, the query side would never
+        // match anything the scanner stored.
+        assert_eq!(normalize_path(r"\\?\C:\Users\dev\proj"), r"C:\Users\dev\proj");
+        assert_eq!(normalize_path(r"\\?\UNC\server\share\proj"), r"\\server\share\proj");
+        assert_eq!(
+            relation(&normalize_path(r"\\?\C:\Users\dev\proj"), r"C:\Users\dev\proj"),
+            Some(Rel::Exact)
+        );
+        // A trailing backslash is trimmed the way a trailing slash always was.
+        assert_eq!(normalize_path(r"C:\Users\dev\proj\"), r"C:\Users\dev\proj");
+    }
+
+    #[test]
+    fn different_drives_are_never_related() {
+        assert_eq!(relation(r"C:\Users\dev\Code\proj", r"D:\Users\dev\Code\proj"), None);
+    }
+
+    #[test]
     fn directory_matching_ignores_case_like_the_filesystem_does() {
         assert_eq!(
             relation("/Users/Dev/Code/Proj", "/users/dev/code/proj"),
@@ -2054,7 +2174,10 @@ mod tests {
         // itself imports and indexes. A token here would end up searchable
         // inside the archive it protects.
         let token = "s3cr3ttokenvalue0000000000000000";
-        for snippet in setup_snippets("http://127.0.0.1:8722/mcp", token) {
+        let both = [true, false].into_iter().flat_map(|ps| {
+            setup_snippets_for("http://127.0.0.1:8722/mcp", token, ps)
+        });
+        for snippet in both {
             if let Some(enroll) = &snippet.enroll {
                 assert!(
                     !enroll.contains(token),
@@ -2093,6 +2216,31 @@ mod tests {
         let json = snippets.iter().find(|s| s.client == "json").unwrap();
         assert!(json.enroll.is_none());
         assert_eq!(snippets.iter().filter(|s| s.enroll.is_some()).count(), 2);
+    }
+
+    #[test]
+    fn windows_gets_powershell_one_liners_not_posix_ones() {
+        // A POSIX one-liner pasted into PowerShell fails in ways that look like
+        // the server is broken: `TOKEN=$(...)` is a parse error and `>>` writes
+        // UTF-16. Both clients have to be spelled for the host's shell.
+        let ps = setup_snippets_for("http://127.0.0.1:8722/mcp", "tok", true);
+        let claude = ps.iter().find(|s| s.client == "claude_code").unwrap();
+        assert_eq!(claude.kind, "powershell");
+        let enroll = claude.enroll.as_ref().unwrap();
+        assert!(enroll.contains("Invoke-RestMethod"), "got: {enroll}");
+        assert!(!enroll.contains("curl -sf"), "got: {enroll}");
+
+        let codex = ps.iter().find(|s| s.client == "codex").unwrap();
+        let enroll = codex.enroll.as_ref().unwrap();
+        // `~` is not expanded by PowerShell cmdlets the way a shell expands it.
+        assert!(enroll.contains("$env:USERPROFILE"), "got: {enroll}");
+        assert!(!enroll.contains("~/.codex"), "got: {enroll}");
+
+        // The POSIX variant must stay POSIX.
+        let posix = setup_snippets_for("http://127.0.0.1:8722/mcp", "tok", false);
+        let claude = posix.iter().find(|s| s.client == "claude_code").unwrap();
+        assert_eq!(claude.kind, "shell");
+        assert!(claude.enroll.as_ref().unwrap().contains("curl -sf"));
     }
 
     #[test]

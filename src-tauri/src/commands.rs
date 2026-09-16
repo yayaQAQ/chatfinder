@@ -1079,55 +1079,231 @@ pub async fn semantic_search(
 
 // ─── Resume CC / Codex session in terminal ───────────────────────────────────
 
-/// Open a terminal and run `command` (e.g. `claude --resume <id>`) inside it.
-/// Reads `preferred_terminal` from settings; defaults to macOS Terminal.app.
-/// Only macOS is supported; on other platforms this returns an error.
-#[tauri::command]
-pub fn launch_resume_terminal(
-    state: State<DbState>,
-    command: String,
-    cwd: Option<String>,
-) -> Result<(), String> {
-    if !cfg!(target_os = "macos") {
-        return Err("Terminal resume is only supported on macOS".to_string());
-    }
-    if command.trim().is_empty() {
-        return Err("Resume command is empty".to_string());
-    }
+/// One entry in the "terminal app" dropdown. `label` is the product/binary
+/// name (never translated); `mode` tells the frontend which localized suffix
+/// to append — "window" = new window, "tab" = new tab in the current window,
+/// "default" = the auto-detect entry.
+#[derive(Serialize)]
+pub struct TerminalOption {
+    pub value: String,
+    pub label: String,
+    pub mode: String,
+}
 
-    let preferred = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+/// Everything the frontend needs to build a resume command that is both
+/// runnable here and pasteable into the user's own terminal.
+#[derive(Serialize)]
+pub struct TerminalEnv {
+    /// "macos" | "windows" | "linux" | "other"
+    pub platform: String,
+    /// Shell dialect the command must be written in: "posix" | "powershell" | "cmd".
+    /// Decides how env-var prefixes and `cd` are spelled.
+    pub shell: String,
+    pub preferred: String,
+    pub options: Vec<TerminalOption>,
+}
+
+fn opt(value: &str, label: &str, mode: &str) -> TerminalOption {
+    TerminalOption { value: value.into(), label: label.into(), mode: mode.into() }
+}
+
+/// Is `exe` reachable on PATH? Used to hide terminals that aren't installed.
+/// Note this is unreliable for GUI-launched macOS apps (they inherit a minimal
+/// PATH), so it is only consulted on Windows and Linux.
+fn on_path(exe: &str) -> bool {
+    let exts: &[&str] = if cfg!(windows) { &[".exe", ".cmd", ".bat", ""] } else { &[""] };
+    std::env::var_os("PATH")
+        .map(|paths| {
+            std::env::split_paths(&paths).any(|dir| {
+                exts.iter().any(|ext| dir.join(format!("{exe}{ext}")).is_file())
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Linux terminals we know how to drive, in auto-detect preference order.
+/// `(binary, supports a "new tab in existing window" flag)`
+const LINUX_TERMINALS: &[(&str, bool)] = &[
+    ("gnome-terminal", true),
+    ("konsole", true),
+    ("xfce4-terminal", true),
+    ("tilix", true),
+    ("kitty", false),
+    ("wezterm", false),
+    ("alacritty", false),
+    ("x-terminal-emulator", false),
+    ("xterm", false),
+];
+
+fn terminal_options() -> Vec<TerminalOption> {
+    if cfg!(target_os = "macos") {
+        return vec![
+            opt("terminal", "Terminal.app", "window"),
+            opt("iterm2", "iTerm2", "window"),
+            opt("iterm2_tab", "iTerm2", "tab"),
+        ];
+    }
+    if cfg!(target_os = "windows") {
+        let mut out = Vec::new();
+        if on_path("wt") {
+            out.push(opt("wt", "Windows Terminal", "window"));
+            out.push(opt("wt_tab", "Windows Terminal", "tab"));
+        }
+        if on_path("pwsh") {
+            out.push(opt("pwsh", "PowerShell 7", "window"));
+        }
+        out.push(opt("powershell", "Windows PowerShell", "window"));
+        out.push(opt("cmd", "cmd.exe", "window"));
+        return out;
+    }
+    if cfg!(target_os = "linux") {
+        let mut out = vec![opt("auto", "", "default")];
+        for (bin, tabs) in LINUX_TERMINALS {
+            if !on_path(bin) {
+                continue;
+            }
+            out.push(opt(bin, bin, "window"));
+            if *tabs {
+                out.push(opt(&format!("{bin}_tab"), bin, "tab"));
+            }
+        }
+        return out;
+    }
+    Vec::new()
+}
+
+fn default_terminal() -> String {
+    if cfg!(target_os = "macos") {
+        "terminal".into()
+    } else if cfg!(target_os = "windows") {
+        if on_path("wt") { "wt".into() } else { "powershell".into() }
+    } else {
+        "auto".into()
+    }
+}
+
+/// Only cmd.exe needs its own dialect; Windows Terminal and both PowerShells
+/// run the command through PowerShell, everything else is POSIX.
+fn shell_dialect(preferred: &str) -> &'static str {
+    if cfg!(target_os = "windows") {
+        if preferred == "cmd" { "cmd" } else { "powershell" }
+    } else {
+        "posix"
+    }
+}
+
+fn read_preferred_terminal(state: &State<DbState>) -> String {
+    let stored = state.0.lock().ok().and_then(|conn| {
         conn.query_row(
             "SELECT value FROM settings WHERE key = 'preferred_terminal'",
             [],
             |r| r.get::<_, String>(0),
         )
         .ok()
-        .unwrap_or_else(|| "terminal".to_string())
-    };
-
-    let full_cmd = match &cwd {
-        Some(dir) if !dir.trim().is_empty() => {
-            let escaped = shell_escape_single(dir);
-            format!("cd {escaped} && {command}")
-        }
-        _ => command.clone(),
-    };
-
-    match preferred.as_str() {
-        "iterm2" | "iterm" => launch_iterm(&full_cmd),
-        _ => launch_macos_terminal(&full_cmd),
+    });
+    match stored {
+        Some(v) if !v.trim().is_empty() => v,
+        _ => default_terminal(),
     }
 }
 
+/// Host platform, shell dialect, and the terminal apps actually available here.
+/// The stored preference, or this host's default when it names a terminal that
+/// doesn't exist here — settings copied from another machine (or an app that
+/// has since been uninstalled) would otherwise silently fail to launch.
+fn resolve_terminal(state: &State<DbState>, options: &[TerminalOption]) -> String {
+    let preferred = read_preferred_terminal(state);
+    if options.iter().any(|o| o.value == preferred) {
+        preferred
+    } else {
+        default_terminal()
+    }
+}
+
+#[tauri::command]
+pub fn terminal_env(state: State<DbState>) -> Result<TerminalEnv, String> {
+    let options = terminal_options();
+    let preferred = resolve_terminal(&state, &options);
+    let platform = if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "other"
+    };
+    Ok(TerminalEnv {
+        platform: platform.into(),
+        shell: shell_dialect(&preferred).into(),
+        preferred,
+        options,
+    })
+}
+
+/// Open a terminal and run `command` (e.g. `claude --resume <id>`) inside it.
+/// `command` is expected to already be written in the dialect `terminal_env`
+/// reported; `cwd` is applied by the terminal itself, not by string-prefixing.
+#[tauri::command]
+pub fn launch_resume_terminal(
+    state: State<DbState>,
+    command: String,
+    cwd: Option<String>,
+) -> Result<(), String> {
+    if command.trim().is_empty() {
+        return Err("Resume command is empty".to_string());
+    }
+    let preferred = resolve_terminal(&state, &terminal_options());
+    let dir = cwd.filter(|d| !d.trim().is_empty());
+
+    #[cfg(target_os = "macos")]
+    {
+        return launch_macos(&preferred, &command, dir.as_deref());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return launch_windows(&preferred, &command, dir.as_deref());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return launch_linux(&preferred, &command, dir.as_deref());
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        let _ = (preferred, dir);
+        Err("Terminal resume is not supported on this platform".to_string())
+    }
+}
+
+// Unused on Windows, which quotes via raw_arg / native argv instead.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 fn shell_escape_single(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+// ─── macOS ───────────────────────────────────────────────────────────────────
+
+#[cfg(target_os = "macos")]
+fn launch_macos(preferred: &str, command: &str, cwd: Option<&str>) -> Result<(), String> {
+    // Terminal.app / iTerm take a command string, not an argv + cwd, so the
+    // directory has to ride along as a `cd`.
+    let full_cmd = match cwd {
+        Some(dir) => format!("cd {} && {command}", shell_escape_single(dir)),
+        None => command.to_string(),
+    };
+    match preferred {
+        "iterm2_tab" => launch_iterm(&full_cmd, true),
+        "iterm2" | "iterm" => launch_iterm(&full_cmd, false),
+        _ => launch_macos_terminal(&full_cmd),
+    }
+}
+
+#[cfg(target_os = "macos")]
 fn escape_osascript(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+#[cfg(target_os = "macos")]
 fn launch_macos_terminal(command: &str) -> Result<(), String> {
     // In App Sandbox (MAS / sandbox test builds) the kernel blocks child
     // process spawning, so osascript can activate Terminal but "do script"
@@ -1151,15 +1327,27 @@ end tell"#
     Ok(())
 }
 
-fn launch_iterm(command: &str) -> Result<(), String> {
+/// `reuse_window`: open a new tab in the frontmost iTerm window instead of a
+/// brand-new window (falls back to a new window when iTerm has none open).
+#[cfg(target_os = "macos")]
+fn launch_iterm(command: &str, reuse_window: bool) -> Result<(), String> {
     if std::env::var("APP_SANDBOX_CONTAINER_ID").is_ok() {
         return Err("Terminal launch blocked in App Sandbox".to_string());
     }
     let escaped = escape_osascript(command);
+    let open_target = if reuse_window {
+        r#"if (count of windows) = 0 then
+        create window with default profile
+    else
+        tell current window to create tab with default profile
+    end if"#
+    } else {
+        "create window with default profile"
+    };
     let script = format!(
         r#"tell application "iTerm"
     activate
-    create window with default profile
+    {open_target}
     tell current session of current window
         write text "{escaped}"
     end tell
@@ -1171,6 +1359,171 @@ end tell"#
         .status()
         .map_err(|e| format!("Failed to launch iTerm: {e}"))?;
     Ok(())
+}
+
+// ─── Windows ─────────────────────────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+fn launch_windows(preferred: &str, command: &str, cwd: Option<&str>) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    // A GUI process has no console to inherit, so the shell must be given a
+    // fresh one; wt.exe draws its own window and wants no console at all.
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let mut cmd;
+    match preferred {
+        "wt" | "wt_tab" => {
+            cmd = std::process::Command::new("wt");
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            if preferred == "wt_tab" {
+                // `-w 0` targets the most recently used Windows Terminal
+                // window; without it wt always spawns a new one.
+                cmd.args(["-w", "0", "new-tab"]);
+            }
+            if let Some(dir) = cwd {
+                cmd.args(["-d", dir]);
+            }
+            // wt treats `;` as its own sub-command separator, so any semicolon
+            // in the PowerShell command (env-var prefixes) must be escaped.
+            let escaped = command.replace(';', "\\;");
+            let shell = if on_path("pwsh") { "pwsh" } else { "powershell" };
+            cmd.args([shell, "-NoExit", "-Command", &escaped]);
+        }
+        "cmd" => {
+            cmd = std::process::Command::new("cmd");
+            cmd.creation_flags(CREATE_NEW_CONSOLE);
+            // cmd.exe does not follow the MSVCRT quoting rules Command would
+            // apply, and the command already contains its own quotes
+            // (`set "VAR=value"`), so hand it the tail verbatim.
+            // /K keeps the window open after the agent exits.
+            cmd.raw_arg("/K").raw_arg(command);
+        }
+        other => {
+            let shell = if other == "pwsh" { "pwsh" } else { "powershell" };
+            cmd = std::process::Command::new(shell);
+            cmd.creation_flags(CREATE_NEW_CONSOLE);
+            cmd.args(["-NoExit", "-Command", command]);
+        }
+    }
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    // spawn, not status: these shells stay alive for as long as the user keeps
+    // the window open.
+    cmd.spawn()
+        .map_err(|e| format!("Failed to launch terminal ({preferred}): {e}"))?;
+    Ok(())
+}
+
+// ─── Linux ───────────────────────────────────────────────────────────────────
+
+/// argv for `term` (minus the binary): working directory flag + the command,
+/// wrapped so the shell stays open after the agent exits.
+#[cfg(target_os = "linux")]
+fn linux_args(term: &str, new_tab: bool, cwd: Option<&str>, inner: &str) -> Vec<String> {
+    let s = |v: &str| v.to_string();
+    let mut a: Vec<String> = Vec::new();
+    match term {
+        "gnome-terminal" => {
+            if new_tab {
+                a.push(s("--tab"));
+            }
+            if let Some(d) = cwd {
+                a.push(format!("--working-directory={d}"));
+            }
+            a.extend([s("--"), s("bash"), s("-lc"), s(inner)]);
+        }
+        "konsole" => {
+            if new_tab {
+                a.push(s("--new-tab"));
+            }
+            if let Some(d) = cwd {
+                a.extend([s("--workdir"), s(d)]);
+            }
+            a.extend([s("-e"), s("bash"), s("-lc"), s(inner)]);
+        }
+        "xfce4-terminal" => {
+            if new_tab {
+                a.push(s("--tab"));
+            }
+            if let Some(d) = cwd {
+                a.push(format!("--working-directory={d}"));
+            }
+            // xfce4-terminal re-parses --command itself, so it needs one
+            // already-quoted string rather than a bare argv tail.
+            a.push(format!("--command=bash -lc {}", shell_escape_single(inner)));
+        }
+        "tilix" => {
+            a.push(s(if new_tab { "--action=app-new-tab" } else { "--action=app-new-session" }));
+            if let Some(d) = cwd {
+                a.push(format!("--working-directory={d}"));
+            }
+            a.extend([s("-e"), format!("bash -lc {}", shell_escape_single(inner))]);
+        }
+        "kitty" => {
+            if let Some(d) = cwd {
+                a.extend([s("--directory"), s(d)]);
+            }
+            a.extend([s("bash"), s("-lc"), s(inner)]);
+        }
+        "wezterm" => {
+            a.push(s("start"));
+            if let Some(d) = cwd {
+                a.extend([s("--cwd"), s(d)]);
+            }
+            a.extend([s("--"), s("bash"), s("-lc"), s(inner)]);
+        }
+        "alacritty" => {
+            if let Some(d) = cwd {
+                a.extend([s("--working-directory"), s(d)]);
+            }
+            a.extend([s("-e"), s("bash"), s("-lc"), s(inner)]);
+        }
+        // xterm and the Debian x-terminal-emulator alternative: no portable
+        // cwd flag, so current_dir() below does that job.
+        _ => a.extend([s("-e"), s("bash"), s("-lc"), s(inner)]),
+    }
+    a
+}
+
+#[cfg(target_os = "linux")]
+fn launch_linux(preferred: &str, command: &str, cwd: Option<&str>) -> Result<(), String> {
+    // Keep the shell alive once the agent exits, matching what Terminal.app
+    // and `wt`/`-NoExit` do on the other platforms.
+    let inner = format!("{command}; exec \"${{SHELL:-bash}}\"");
+
+    let (base, new_tab) = match preferred.strip_suffix("_tab") {
+        Some(b) => (b, true),
+        None => (preferred, false),
+    };
+    let candidates: Vec<&str> = if base == "auto" || base.is_empty() {
+        LINUX_TERMINALS.iter().map(|(bin, _)| *bin).collect()
+    } else {
+        vec![base]
+    };
+
+    let mut last_err = String::new();
+    for term in candidates {
+        if !on_path(term) {
+            last_err = format!("{term} is not installed");
+            continue;
+        }
+        let mut cmd = std::process::Command::new(term);
+        cmd.args(linux_args(term, new_tab, cwd, &inner));
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+        }
+        match cmd.spawn() {
+            Ok(_) => return Ok(()),
+            Err(e) => last_err = format!("Failed to launch {term}: {e}"),
+        }
+    }
+    Err(if last_err.is_empty() {
+        "No supported terminal emulator found".to_string()
+    } else {
+        last_err
+    })
 }
 
 // ─── Local agent-session scan / import ───────────────────────────────────────

@@ -104,7 +104,8 @@ export interface AutoSyncStatus {
 
 export interface McpSetupSnippet {
   client: "claude_code" | "codex" | "json";
-  kind: "shell" | "toml" | "json";
+  /** "powershell" replaces "shell" when the host is Windows. */
+  kind: "shell" | "powershell" | "toml" | "json";
   content: string;
   /** Secret-free variant that fetches the token from /enroll at run time. */
   enroll: string | null;
@@ -164,6 +165,22 @@ export interface StructuralFilter {
 
 export interface ConversationFilter extends StructuralFilter {
   sort?: SortOption;
+}
+
+export interface TerminalOption {
+  value: string;
+  /** Product/binary name, never translated. */
+  label: string;
+  /** "window" | "tab" | "default" — picks the localized suffix in the UI. */
+  mode: string;
+}
+
+/** Host platform + which shell dialect a resume command must be written in. */
+export interface TerminalEnv {
+  platform: "macos" | "windows" | "linux" | "other";
+  shell: "posix" | "powershell" | "cmd";
+  preferred: string;
+  options: TerminalOption[];
 }
 
 export const api = {
@@ -272,6 +289,7 @@ export const api = {
     }),
   launchResumeTerminal: (command: string, cwd?: string) =>
     invoke<void>("launch_resume_terminal", { command, cwd }),
+  terminalEnv: () => invoke<TerminalEnv>("terminal_env"),
   autoSyncStatus: () => invoke<AutoSyncStatus>("autosync_status"),
   autoSyncSetEnabled: (enabled: boolean) => invoke<AutoSyncStatus>("autosync_set_enabled", { enabled }),
   autoSyncSetInterval: (minutes: number) => invoke<AutoSyncStatus>("autosync_set_interval", { minutes }),

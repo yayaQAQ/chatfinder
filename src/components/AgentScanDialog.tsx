@@ -3,7 +3,16 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { X, FolderSearch, FolderOpen, CheckCircle2, Bot, Loader2, RefreshCw, Clock } from "lucide-react";
 import { api, type AutoSyncStatus, type AgentSource, type AgentDirOverrides, type ImportSummary, type ImportProgress as Progress } from "../lib/api";
 import { useToast } from "../lib/toast";
-import { useI18n } from "../lib/i18n";
+import { useI18n, type TranslationKey } from "../lib/i18n";
+import { hostOs, type HostOs } from "../lib/platform";
+
+// Every file picker hides dotfiles by default and each one reveals them
+// differently, so the hint has to match the dialog the user is looking at.
+const HIDDEN_FOLDER_HINT: Record<HostOs, TranslationKey> = {
+  macos: "agentScanDialog.hiddenFolderHintMac",
+  linux: "agentScanDialog.hiddenFolderHintLinux",
+  windows: "agentScanDialog.hiddenFolderHintWindows",
+};
 
 interface Props {
   onClose: () => void;
@@ -247,7 +256,7 @@ export function AgentScanDialog({ onClose, onImported }: Props) {
                             </button>
                           </div>
                           {!hasOverride && (
-                            <p className="text-[10px] text-stone-300">{t("agentScanDialog.hiddenFolderHint")}</p>
+                            <p className="text-[10px] text-stone-300">{t(HIDDEN_FOLDER_HINT[hostOs])}</p>
                           )}
                         </div>
                       </div>

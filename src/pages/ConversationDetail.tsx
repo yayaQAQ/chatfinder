@@ -6,7 +6,7 @@ import {
   ArrowLeft, ExternalLink, Star, MessageSquare, Copy, Check, PanelRightClose, PanelRight,
   Search, ChevronUp, ChevronDown, X, Trash2, FolderOpen, Settings, ListFilter,
 } from "lucide-react";
-import { api, type ConversationSummary, type MessageRow } from "../lib/api";
+import { api, type ConversationSummary, type MessageRow, type TerminalEnv } from "../lib/api";
 import { FavoriteModal } from "../components/FavoriteModal";
 import { MessageBubble } from "../components/MessageBubble";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -36,6 +36,9 @@ function stripForPreview(text: string, imagePlaceholder: string): string {
 // choose which of these to display in the transcript; the selection is stored
 // globally (settings key `visible_kinds`, comma-separated) and defaults to
 // text-only so the transcript stays readable.
+// Proxy env vars threaded into the resume command when one is configured.
+const PROXY_VARS = ["HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"];
+
 const MESSAGE_KINDS: { value: string; labelKey: TranslationKey }[] = [
   { value: "text", labelKey: "conversationDetail.kindText" },
   { value: "tool_use", labelKey: "conversationDetail.kindToolUse" },
@@ -62,24 +65,38 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
   const [favoriteTarget, setFavoriteTarget] = useState<{ text: string; messageId: string | null } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [resuming, setResuming] = useState(false);
+  const [resumeCmdCopied, setResumeCmdCopied] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   const [terminalSettingsOpen, setTerminalSettingsOpen] = useState(false);
-  const [resumeSettings, setResumeSettings] = useState({ proxy: "", claudeArgs: "", codexArgs: "" });
+  const [resumeSettings, setResumeSettings] = useState<{
+    proxy: string;
+    claudeArgs: string;
+    codexArgs: string;
+    shell: TerminalEnv["shell"];
+  }>({ proxy: "", claudeArgs: "", codexArgs: "", shell: "posix" });
   const [visibleKinds, setVisibleKinds] = useState<Set<string>>(new Set(["text"]));
   const [filterOpen, setFilterOpen] = useState(false);
   const humanMessages = messages.filter((m) => m.sender === "human");
   const visibleMessages = messages.filter((m) => visibleKinds.has(m.kind || "text"));
 
-  // Proxy + extra args for the "resume in terminal" command (terminal app choice
-  // is read server-side). Re-loaded after the TerminalSettings dialog saves.
+  // Proxy + extra args for the "resume in terminal" command, plus the shell
+  // dialect the command must be spelled in (POSIX / PowerShell / cmd — depends
+  // on the host OS and the chosen terminal). The terminal app itself is read
+  // server-side. Re-loaded after the TerminalSettings dialog saves.
   const loadResumeSettings = useCallback(() => {
     Promise.all([
       api.getSetting("resume_proxy"),
       api.getSetting("claude_code_args"),
       api.getSetting("codex_args"),
+      api.terminalEnv().catch(() => null),
     ])
-      .then(([proxy, claudeArgs, codexArgs]) =>
-        setResumeSettings({ proxy: proxy ?? "", claudeArgs: claudeArgs ?? "", codexArgs: codexArgs ?? "" }),
+      .then(([proxy, claudeArgs, codexArgs, env]) =>
+        setResumeSettings({
+          proxy: proxy ?? "",
+          claudeArgs: claudeArgs ?? "",
+          codexArgs: codexArgs ?? "",
+          shell: env?.shell ?? "posix",
+        }),
       )
       .catch(() => {});
   }, []);
@@ -159,23 +176,37 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
 
   const resumeCommand = (() => {
     if (!conv) return null;
-    const { proxy, claudeArgs, codexArgs } = resumeSettings;
-    const proxyPrefix = proxy ? `HTTPS_PROXY=${proxy} HTTP_PROXY=${proxy} ALL_PROXY=${proxy} ` : "";
+    const { proxy, claudeArgs, codexArgs, shell } = resumeSettings;
+    // Setting env vars and changing directory are spelled differently in every
+    // shell, and the copied command has to be runnable as typed.
+    const proxyPrefix = !proxy
+      ? ""
+      : shell === "powershell"
+        ? PROXY_VARS.map((v) => `$env:${v}='${proxy.replace(/'/g, "''")}'; `).join("")
+        : shell === "cmd"
+          ? PROXY_VARS.map((v) => `set "${v}=${proxy}" && `).join("")
+          : `${PROXY_VARS.map((v) => `${v}=${proxy}`).join(" ")} `;
+    // Mirrors the working directory the backend hands the terminal, so the
+    // copied string can be pasted straight into an already-open tab.
+    const withCwd = (cmd: string, cwd?: string) => {
+      if (!cwd || !cwd.trim()) return cmd;
+      if (shell === "powershell") return `cd '${cwd.replace(/'/g, "''")}'; ${cmd}`;
+      if (shell === "cmd") return `cd /d "${cwd}" && ${cmd}`;
+      return `cd '${cwd.replace(/'/g, `'\\''`)}' && ${cmd}`;
+    };
     if (conv.platform === "claude-code") {
       const sessionId = conv.id.startsWith("cc:") ? conv.id.slice(3) : conv.id;
       const extra = claudeArgs.trim();
-      return {
-        cmd: `${proxyPrefix}claude --resume ${sessionId}${extra ? ` ${extra}` : ""}`,
-        cwd: conv.summary || undefined,
-      };
+      const cwd = conv.summary || undefined;
+      const cmd = `${proxyPrefix}claude --resume ${sessionId}${extra ? ` ${extra}` : ""}`;
+      return { cmd, cwd, full: withCwd(cmd, cwd) };
     }
     if (conv.platform === "codex") {
       const sessionId = conv.id.startsWith("codex:") ? conv.id.slice(6) : conv.id;
       const extra = codexArgs.trim();
-      return {
-        cmd: `${proxyPrefix}codex resume ${sessionId}${extra ? ` ${extra}` : ""}`,
-        cwd: conv.summary || undefined,
-      };
+      const cwd = conv.summary || undefined;
+      const cmd = `${proxyPrefix}codex resume ${sessionId}${extra ? ` ${extra}` : ""}`;
+      return { cmd, cwd, full: withCwd(cmd, cwd) };
     }
     return null;
   })();
@@ -198,6 +229,20 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
     } finally {
       setResuming(false);
     }
+  };
+
+  // Copy the ready-to-run command (including the `cd`) so the user can paste it
+  // into a terminal tab they already have open instead of spawning a new window.
+  const handleCopyResumeCommand = async () => {
+    if (!resumeCommand) return;
+    try {
+      await clipboardWrite(resumeCommand.full);
+    } catch {
+      await navigator.clipboard.writeText(resumeCommand.full).catch(() => {});
+    }
+    setResumeCmdCopied(true);
+    push(t("conversationDetail.resumeCommandCopied"), "success");
+    setTimeout(() => setResumeCmdCopied(false), 1600);
   };
 
   const deleteConversation = async () => {
@@ -408,6 +453,17 @@ export function ConversationDetail({ onDataChanged }: { onDataChanged?: () => vo
               >
                 <ExternalLink size={13} />
                 {resuming ? t("conversationDetail.resumeLaunching") : t("conversationDetail.resumeConversation")}
+              </button>
+              <button
+                onClick={handleCopyResumeCommand}
+                title={`${t("conversationDetail.copyResumeCommand")}\n${resumeCommand.full}`}
+                className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
+                  resumeCmdCopied
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-600"
+                    : "border-stone-200 bg-white text-stone-400 hover:bg-stone-50 hover:text-stone-700"
+                }`}
+              >
+                {resumeCmdCopied ? <Check size={14} /> : <Copy size={14} />}
               </button>
               <button
                 onClick={() => setTerminalSettingsOpen(true)}

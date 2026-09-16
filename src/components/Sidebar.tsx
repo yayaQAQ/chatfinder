@@ -3,6 +3,7 @@ import { MessageSquareText, Star, UploadCloud, FileJson, Search, BrainCircuit, F
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { modKey } from "../lib/platform";
 import appLogo from "../assets/app-logo.png";
 
 const navItem = ({ isActive }: { isActive: boolean }) =>
@@ -66,7 +67,7 @@ export function Sidebar({ onImportClick, onSearchClick, onSettingsClick, onAgent
       >
         <Search size={14} className="shrink-0" />
         <span className="flex-1 text-left text-xs">{t("sidebar.searchPlaceholder")}</span>
-        <kbd className="rounded border border-stone-200 bg-white px-1.5 py-0.5 text-[10px] text-stone-400">⌘K</kbd>
+        <kbd className="rounded border border-stone-200 bg-white px-1.5 py-0.5 text-[10px] text-stone-400">{modKey}K</kbd>
       </button>
 
       {/* Nav */}
@@ -127,7 +128,7 @@ export function Sidebar({ onImportClick, onSearchClick, onSettingsClick, onAgent
           <span className="truncate">{t("sidebar.importButton")}</span>
         </button>
         <p className="text-center text-[10px] leading-snug text-stone-400">
-          <kbd className="rounded border border-stone-200 bg-stone-50 px-1 py-0.5">⌘I</kbd> {t("sidebar.shortcutHint")}
+          <kbd className="rounded border border-stone-200 bg-stone-50 px-1 py-0.5">{modKey}I</kbd> {t("sidebar.shortcutHint")}
         </p>
       </div>
     </aside>
