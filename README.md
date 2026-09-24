@@ -34,6 +34,14 @@ A cross-platform desktop app (Tauri + React) for importing, browsing, and search
 - **Incremental, idempotent imports** — re-importing the same export only adds new/changed conversations (content-hash based dedup), so you can safely import newer exports over time.
 - **Bilingual UI** — Chinese and English, switchable at any time.
 
+## Screenshots
+
+| Favorites | Local agent sessions |
+| --- | --- |
+| ![Favorites with tags and notes](docs/screenshots/favorites.jpg) | ![Import Claude Code / Codex sessions with auto sync](docs/screenshots/agent-sessions.jpg) |
+| **MCP server** | **Import chat history** |
+| ![Read-only MCP server for local AI agents](docs/screenshots/mcp-server.jpg) | ![Import Claude / ChatGPT / DeepSeek export ZIP](docs/screenshots/import.jpg) |
+
 ## Tech stack
 
 - **Frontend:** React 19 + TypeScript, Vite, Tailwind CSS, Zustand, React Router, react-markdown

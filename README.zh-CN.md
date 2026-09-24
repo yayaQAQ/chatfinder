@@ -34,6 +34,14 @@
 - **增量、幂等导入** — 重复导入同一份导出文件时，只会新增/更新有变化的对话（基于内容哈希去重），可放心地随时导入更新后的导出数据。
 - **中英双语界面** — 可随时切换，偏好自动记忆。
 
+## 界面截图
+
+| 收藏夹 | 本地 Agent 会话 |
+| --- | --- |
+| ![收藏夹：标签与备注](docs/screenshots/favorites.jpg) | ![导入 Claude Code / Codex 会话并自动同步](docs/screenshots/agent-sessions.jpg) |
+| **MCP 服务** | **导入对话历史** |
+| ![供本地 AI agent 检索的只读 MCP 服务](docs/screenshots/mcp-server.jpg) | ![导入 Claude / ChatGPT / DeepSeek 导出 ZIP](docs/screenshots/import.jpg) |
+
 ## 技术栈
 
 - **前端：** React 19 + TypeScript、Vite、Tailwind CSS、Zustand、React Router、react-markdown
