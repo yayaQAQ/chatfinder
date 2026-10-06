@@ -98,6 +98,7 @@ pub fn run() {
             commands::import_agent_sessions,
             commands::launch_resume_terminal,
             commands::terminal_env,
+            commands::reveal_data_dir,
             mcp::mcp_status,
             mcp::mcp_set_enabled,
             mcp::mcp_set_port,

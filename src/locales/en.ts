@@ -44,6 +44,7 @@ export const en: typeof zh = {
     shortcutHint: "shortcut",
     language: "Language",
     importHistory: "Import History",
+    openDataDir: "Open Database Folder",
   },
   conversations: {
     searchPlaceholderSemantic: "Describe what you're looking for, e.g. conversations about machine learning…",

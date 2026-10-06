@@ -1241,6 +1241,24 @@ pub fn terminal_env(state: State<DbState>) -> Result<TerminalEnv, String> {
     })
 }
 
+/// Reveal the SQLite database in the system file manager (Finder / Explorer),
+/// so users can back it up or inspect it. Falls back to opening the data
+/// directory itself if the db file can't be selected.
+#[tauri::command]
+pub fn reveal_data_dir(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_opener::OpenerExt;
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db_file = crate::db::db_path(&data_dir);
+    let opener = app.opener();
+    if db_file.exists() && opener.reveal_item_in_dir(&db_file).is_ok() {
+        return Ok(db_file.to_string_lossy().into_owned());
+    }
+    opener
+        .open_path(data_dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())?;
+    Ok(data_dir.to_string_lossy().into_owned())
+}
+
 /// Open a terminal and run `command` (e.g. `claude --resume <id>`) inside it.
 /// `command` is expected to already be written in the dialect `terminal_env`
 /// reported; `cwd` is applied by the terminal itself, not by string-prefixing.

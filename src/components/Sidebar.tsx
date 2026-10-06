@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { MessageSquareText, Star, UploadCloud, FileJson, Search, BrainCircuit, FolderSearch, History, Plug } from "lucide-react";
+import { MessageSquareText, Star, UploadCloud, FileJson, Search, BrainCircuit, FolderSearch, History, Plug, FolderOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -112,6 +112,14 @@ export function Sidebar({ onImportClick, onSearchClick, onSettingsClick, onAgent
         <button onClick={onImportHistoryClick} title={t("sidebar.importHistory")} className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors text-stone-600 hover:bg-stone-100 hover:text-stone-900`}>
           <History size={15} className="shrink-0" />
           <span className="min-w-0 flex-1 truncate text-left">{t("sidebar.importHistory")}</span>
+        </button>
+        <button
+          onClick={() => api.revealDataDir().catch((e) => console.error("reveal data dir failed", e))}
+          title={t("sidebar.openDataDir")}
+          className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors text-stone-600 hover:bg-stone-100 hover:text-stone-900`}
+        >
+          <FolderOpen size={15} className="shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-left">{t("sidebar.openDataDir")}</span>
         </button>
       </nav>
 

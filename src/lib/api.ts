@@ -290,6 +290,7 @@ export const api = {
   launchResumeTerminal: (command: string, cwd?: string) =>
     invoke<void>("launch_resume_terminal", { command, cwd }),
   terminalEnv: () => invoke<TerminalEnv>("terminal_env"),
+  revealDataDir: () => invoke<string>("reveal_data_dir"),
   autoSyncStatus: () => invoke<AutoSyncStatus>("autosync_status"),
   autoSyncSetEnabled: (enabled: boolean) => invoke<AutoSyncStatus>("autosync_set_enabled", { enabled }),
   autoSyncSetInterval: (minutes: number) => invoke<AutoSyncStatus>("autosync_set_interval", { minutes }),

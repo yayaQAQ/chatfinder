@@ -45,6 +45,7 @@ export const zh = {
     shortcutHint: "快捷键",
     language: "语言",
     importHistory: "导入记录",
+    openDataDir: "打开数据库位置",
   },
   conversations: {
     searchPlaceholderSemantic: "描述你想找的内容，例如：关于机器学习的对话…",
