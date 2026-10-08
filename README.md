@@ -97,6 +97,8 @@ Questions, suggestions, or just want to see how others use it — join the QQ gr
 
 <img src="docs/qq-group.jpg" width="240" alt="ChatFinder QQ group QR code">
 
+This project endorses the [LINUX DO](https://linux.do) community.
+
 ## Support this project
 
 ChatFinder is open source — build it yourself and you get the whole app, with nothing held back.

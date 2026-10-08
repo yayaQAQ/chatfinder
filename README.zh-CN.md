@@ -97,6 +97,8 @@ npm run tauri build
 
 <img src="docs/qq-group.jpg" width="240" alt="ChatFinder 交流优化群 QQ 群二维码">
 
+本项目认可 [LINUX DO](https://linux.do) 社区。
+
 ## 支持这个项目
 
 ChatFinder 是开源的，克隆下来自己构建就能完整使用，不会少任何功能。
